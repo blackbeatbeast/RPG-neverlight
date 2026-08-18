@@ -1,0 +1,50 @@
+name: Feature slice
+description: Propose one reviewable player-facing or technical slice
+title: "[Feature] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: "Read AGENTS.md and select the closest backlog packet before proposing work."
+  - type: input
+    id: packet
+    attributes:
+      label: Backlog packet
+      description: "Example: 006-exploration-api"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Player/operational problem
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope / out of scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance and verification
+    validations:
+      required: true
+  - type: checkboxes
+    id: gates
+    attributes:
+      label: Risk gates
+      options:
+        - label: I checked product constraints and relevant ADRs.
+          required: true
+        - label: This does not silently enable trade, PvP, ads, supporter commerce, or suggestive presentation.
+          required: true
+        - label: This does not import protected source-game expression or unlicensed assets.
+          required: true

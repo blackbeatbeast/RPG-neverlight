@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "flags": {
+    "combat.enabled": true,
+    "exploration.enabled": true,
+    "crafting.enabled": false,
+    "cards.enabled": false,
+    "social.bbs.enabled": false,
+    "social.guilds.enabled": false,
+    "pvp.enabled": false,
+    "market.enabled": false,
+    "trade.enabled": false,
+    "presentation.suggestive.enabled": false,
+    "monetization.enabled": false,
+    "ads.enabled": false,
+    "supporterShop.enabled": false
+  }
+}

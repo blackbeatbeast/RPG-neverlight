@@ -1,0 +1,14 @@
+{
+  "name": "rpg-neverlight-blueprint",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Design-controlled blueprint for a clean-room static-image browser RPG",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "validate:blueprint": "node scripts/validate-blueprint.mjs",
+    "test": "node scripts/validate-blueprint.mjs",
+    "format:check": "node scripts/validate-blueprint.mjs"
+  }
+}

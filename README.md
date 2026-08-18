@@ -66,7 +66,7 @@ node scripts/validate-blueprint.mjs
 
 ## Launch stance
 
-- Private development repository at first.
+- Repository visibility remains owner-controlled; publishing scripts never change it.
 - Free access for players during prototype and alpha.
 - No ads, paid loot boxes, paid power, or tradeable premium currency.
 - Cloud cost guards and degradation paths are required before public alpha.

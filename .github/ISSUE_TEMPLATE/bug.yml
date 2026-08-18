@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible defect or invariant violation
+title: "[Bug] "
+labels: []
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Include route, account state, request ID, ruleset/content version, and idempotency context when safe.
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Highest risk
+      options:
+        - Cosmetic/UI
+        - Accessibility
+        - Data loss
+        - Auth/privacy
+        - Duplication/economy
+        - XSS/abuse
+        - Cost/capacity
+        - Content/IP
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs/screenshots/evidence
+      description: Remove secrets, tokens, personal data, and private messages.

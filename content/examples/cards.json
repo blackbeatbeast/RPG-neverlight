@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "cards": [
+    {
+      "id": "card.first-signal",
+      "displayName": "第一信号",
+      "characterId": "char.mireia-voss",
+      "rarity": "rare",
+      "acquisition": [
+        "codex-milestone",
+        "zone-boss"
+      ],
+      "duplicateInk": 20,
+      "effect": {
+        "type": "tag-threshold",
+        "tag": "lattice",
+        "required": 2,
+        "modifier": "first-focus-cost-minus-one",
+        "cap": 1
+      },
+      "generalAsset": "asset.card.first-signal.general",
+      "suggestiveAsset": null
+    },
+    {
+      "id": "card.rain-courier",
+      "displayName": "雨脚の配達人",
+      "characterId": "char.luca-aster",
+      "rarity": "uncommon",
+      "acquisition": [
+        "dispatch-chain"
+      ],
+      "duplicateInk": 8,
+      "effect": {
+        "type": "route-modifier",
+        "tag": "marsh",
+        "modifier": "first-hazard-speed-bonus",
+        "cap": 2
+      },
+      "generalAsset": "asset.card.rain-courier.general",
+      "suggestiveAsset": null
+    }
+  ]
+}

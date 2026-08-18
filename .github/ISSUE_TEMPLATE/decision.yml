@@ -1,0 +1,29 @@
+name: Decision / ADR request
+description: Request an owner decision that changes constraints, architecture, risk, or scope
+title: "[Decision] "
+labels: []
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and decision required
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options and tradeoffs
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommended reversible option
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Product, technical, cost, safety, legal, and migration consequences
+    validations:
+      required: true

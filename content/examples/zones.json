@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "zones": [
+    {
+      "id": "zone.glass-marsh",
+      "displayName": "硝子湿原",
+      "recommendedLevel": [
+        1,
+        8
+      ],
+      "summary": "壊れた信号塔が雨のたびに別の道を映す湿原。",
+      "entryNode": "node.glass-marsh.gate",
+      "nodes": [
+        {
+          "id": "node.glass-marsh.gate",
+          "type": "scene",
+          "commands": [
+            "cmd.enter-reeds",
+            "cmd.inspect-signal"
+          ]
+        },
+        {
+          "id": "node.glass-marsh.reeds",
+          "type": "encounter",
+          "encounterTable": "table.glass-marsh.common"
+        },
+        {
+          "id": "node.glass-marsh.tower",
+          "type": "boss",
+          "encounterTable": "table.glass-marsh.signal-warden"
+        },
+        {
+          "id": "node.glass-marsh.exit",
+          "type": "exit"
+        }
+      ]
+    }
+  ]
+}

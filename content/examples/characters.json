@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "characters": [
+    {
+      "id": "char.mireia-voss",
+      "displayName": "ミレイア・ヴォス",
+      "age": 27,
+      "pronouns": "she/her",
+      "role": "遺物鑑定士",
+      "gameplayFunction": "装備鑑定・来歴表示・アフィックス解説",
+      "traits": [
+        "精密",
+        "挑発的なユーモア",
+        "迷信嫌い"
+      ],
+      "generalAsset": "asset.char.mireia.general",
+      "suggestiveAsset": "asset.char.mireia.suggestive",
+      "suggestiveOptional": true
+    },
+    {
+      "id": "char.luca-aster",
+      "displayName": "ルカ・アスター",
+      "age": 24,
+      "pronouns": "she/her",
+      "role": "賞金配達人",
+      "gameplayFunction": "依頼・ルート危険度・追跡記録",
+      "traits": [
+        "快活",
+        "負けず嫌い",
+        "無鉄砲"
+      ],
+      "generalAsset": "asset.char.luca.general",
+      "suggestiveAsset": null,
+      "suggestiveOptional": false
+    },
+    {
+      "id": "char.safi-ren",
+      "displayName": "サフィ・レン",
+      "age": 31,
+      "pronouns": "she/her",
+      "role": "ギルド仲介人",
+      "gameplayFunction": "ギルド・掲示板・コミュニティ導線",
+      "traits": [
+        "朗らか",
+        "交渉上手",
+        "境界線に厳格"
+      ],
+      "generalAsset": "asset.char.safi.general",
+      "suggestiveAsset": "asset.char.safi.suggestive",
+      "suggestiveOptional": true
+    },
+    {
+      "id": "char.noa-quill",
+      "displayName": "ノア・クイル",
+      "age": 29,
+      "pronouns": "she/her",
+      "role": "義肢技師",
+      "gameplayFunction": "製作・修理・改造説明",
+      "traits": [
+        "辛口",
+        "職人気質",
+        "面倒見がいい"
+      ],
+      "generalAsset": "asset.char.noa.general",
+      "suggestiveAsset": null,
+      "suggestiveOptional": false
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "rarities": [
+    "common",
+    "uncommon",
+    "rare",
+    "unique",
+    "relic"
+  ],
+  "items": [
+    {
+      "id": "item.weapon.signal-knife",
+      "displayName": "信号刃",
+      "slot": "weapon",
+      "tags": [
+        "blade",
+        "lattice"
+      ],
+      "baseStats": {
+        "attack": 7,
+        "focus": 1
+      },
+      "affixSlots": {
+        "common": 0,
+        "uncommon": 1,
+        "rare": 2
+      },
+      "tradePolicy": "unbound-until-equipped"
+    },
+    {
+      "id": "item.guard.reed-coat",
+      "displayName": "葦編み外套",
+      "slot": "body",
+      "tags": [
+        "cloth",
+        "marsh"
+      ],
+      "baseStats": {
+        "guard": 5,
+        "speed": 1
+      },
+      "affixSlots": {
+        "common": 0,
+        "uncommon": 1,
+        "rare": 2
+      },
+      "tradePolicy": "unbound"
+    },
+    {
+      "id": "item.relic.first-receiver",
+      "displayName": "最初の受信器",
+      "slot": "relic",
+      "rarity": "unique",
+      "tags": [
+        "signal",
+        "unique"
+      ],
+      "uniqueRule": "first-command-focus-refund",
+      "tradePolicy": "account-bound"
+    }
+  ],
+  "affixes": [
+    {
+      "id": "affix.focus.echoing",
+      "displayName": "反響する",
+      "allowedSlots": [
+        "weapon",
+        "relic"
+      ],
+      "tags": [
+        "focus"
+      ],
+      "tiers": [
+        {
+          "tier": 1,
+          "min": 1,
+          "max": 2,
+          "budget": 1
+        },
+        {
+          "tier": 2,
+          "min": 3,
+          "max": 4,
+          "budget": 2
+        }
+      ]
+    },
+    {
+      "id": "affix.guard.rainproof",
+      "displayName": "雨除けの",
+      "allowedSlots": [
+        "body",
+        "head"
+      ],
+      "tags": [
+        "guard",
+        "marsh"
+      ],
+      "tiers": [
+        {
+          "tier": 1,
+          "min": 2,
+          "max": 3,
+          "budget": 1
+        }
+      ]
+    }
+  ]
+}

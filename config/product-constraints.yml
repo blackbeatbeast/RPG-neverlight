@@ -1,0 +1,82 @@
+project:
+  codename: Project Neverlight
+  public_name_status: uncleared
+  product_type: asynchronous browser hack-and-slash RPG
+  ip_mode: clean-room original IP
+
+experience:
+  primary_medium:
+    - static illustration
+    - concise text
+    - semantic command links and buttons
+  mandatory_animation: false
+  mandatory_audio: false
+  real_time_action: false
+  supported_inputs:
+    - touch
+    - keyboard
+    - screen_reader
+  target_viewports:
+    min_width_px: 360
+    desktop_reference_width_px: 1280
+  ui_modes:
+    - retro
+    - modern
+  core_session_minutes:
+    min: 1
+    typical: 5
+    long: 20
+
+content:
+  target_tone: nostalgic fantasy plus restrained near-future mystery
+  named_character_minimum_age: 20
+  age_ambiguity_allowed: false
+  sexual_content_maximum: non-explicit suggestive R-15-style presentation
+  explicit_nudity_allowed: false
+  sexual_acts_allowed: false
+  suggestive_layer_default: false
+  general_audience_fallback_required: true
+  user_generated_images_initially_allowed: false
+
+business:
+  launch_access: free
+  monetization_enabled: false
+  ads_enabled: false
+  supporter_shop_enabled: false
+  paid_random_rewards_allowed: false
+  paid_power_allowed: false
+  cash_to_tradeable_currency_allowed: false
+  cost_policy: no paid infrastructure without owner approval
+
+systems:
+  server_authoritative:
+    - combat
+    - loot
+    - inventory
+    - currency
+    - cards
+    - crafting
+    - trade
+    - entitlements
+  deterministic_game_core: true
+  idempotency_required_for_mutations: true
+  ledger_required_for_economy: true
+  feature_flags_default_off:
+    - pvp
+    - player_trade
+    - market
+    - ads
+    - supporter_shop
+    - suggestive_presentation
+    - user_generated_images
+
+release:
+  initial_repository_visibility: private
+  public_alpha_gates:
+    - ip_and_name_review
+    - privacy_and_terms
+    - moderation_tools
+    - cost_guardrails
+    - abuse_tests
+    - accessibility_audit
+    - content_rating_review
