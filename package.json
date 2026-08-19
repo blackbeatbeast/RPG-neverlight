@@ -16,6 +16,7 @@
     "format:check": "prettier --check \"package.json\" \"pnpm-workspace.yaml\" \"tsconfig*.json\" \"*.{mjs,json,jsonc}\" \"apps/**/*.{ts,tsx,css,html,json,jsonc}\" \"packages/**/*.{ts,tsx,json}\" \"packages/db/migrations/README.md\" \".github/workflows/*.yml\"",
     "typecheck": "pnpm --filter @neverlight/* --recursive --if-present run typecheck",
     "test": "pnpm validate:blueprint && pnpm --filter @neverlight/* --recursive --if-present run test",
+    "test:e2e": "playwright test --config=apps/web/playwright.config.ts",
     "validate:blueprint": "node scripts/validate-blueprint.mjs",
     "db:migrate:local": "pnpm --filter @neverlight/worker run db:migrate:local"
   },
@@ -25,6 +26,7 @@
     "eslint": "10.8.1",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.11.0",
+    "@playwright/test": "1.60.0",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
     "typescript-eslint": "8.67.0",

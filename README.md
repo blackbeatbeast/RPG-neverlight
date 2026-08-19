@@ -160,10 +160,25 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm format:check
 ```
 
 The same commands work in Windows PowerShell. `pnpm test` also runs the blueprint check, the fixed
 seed `game-core` test, the valid/invalid content fixture test, and the Worker health test.
+
+The Issue #2 semantic shell also has browser checks for the 360 px touch layout and the 1280 px
+desktop layout. Install the local Chromium browser once, then run both projects:
+
+```bash
+pnpm exec playwright install chromium
+pnpm test:e2e -- --project=mobile
+pnpm test:e2e -- --project=desktop
+```
+
+The browser checks cover the canonical screen flow, numbered keyboard commands, touch buttons,
+input-field shortcut suppression, Retro/Modern command parity, empty/error/maintenance states,
+images-disabled rendering, reduced motion, and 200% zoom reflow. CI installs the same pinned
+Chromium browser with system dependencies and uploads the Playwright evidence as an artifact.
 
 ## Launch stance
 
