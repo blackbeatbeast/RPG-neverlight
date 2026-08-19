@@ -36,9 +36,9 @@ jobs:
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
       - name: Test e2e (mobile)
-        run: pnpm test:e2e -- --project=mobile
+        run: pnpm exec playwright test --config=apps/web/playwright.config.ts --project=mobile
       - name: Test e2e (desktop)
-        run: pnpm test:e2e -- --project=desktop
+        run: pnpm exec playwright test --config=apps/web/playwright.config.ts --project=desktop
       - name: Upload UI evidence
         if: always()
         uses: actions/upload-artifact@v4
