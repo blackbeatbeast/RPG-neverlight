@@ -40,19 +40,24 @@ Public standard-runner Actions are listed as free, but the project should remain
 
 ## Internal prototype budgets
 
-| Resource | Internal warning | Hard application action |
-|---|---:|---|
-| Worker requests/day | 50,000 | degrade non-core feeds at 65,000; read-only at 80,000 |
-| Worker CPU/request p95 | 5 ms | reject/optimize endpoints approaching 8 ms |
-| D1 rows read/day | 2,000,000 | disable broad search/feed at 3,000,000 |
-| D1 rows written/day | 40,000 | rate-limit social/low-value writes at 55,000; read-only economy at 70,000 |
-| D1 storage | 2 GB | archive/review at 3 GB; no uncontrolled event payloads |
-| R2 storage | 5 GB | no new upload path without review |
-| R2 Class B/month | 2,000,000 | cache/resize/review before 5,000,000 |
-| GitHub Actions/month | 600 min | reduce matrix/E2E frequency before 1,000 min |
-| Actions artifacts | 100 MB retained | short retention; no bulky screenshots/videos by default |
+| Resource               | Internal warning | Hard application action                                                   |
+| ---------------------- | ---------------: | ------------------------------------------------------------------------- |
+| Worker requests/day    |           50,000 | degrade non-core feeds at 65,000; read-only at 80,000                     |
+| Worker CPU/request p95 |             5 ms | reject/optimize endpoints approaching 8 ms                                |
+| D1 rows read/day       |        2,000,000 | disable broad search/feed at 3,000,000                                    |
+| D1 rows written/day    |           40,000 | rate-limit social/low-value writes at 55,000; read-only economy at 70,000 |
+| D1 storage             |             2 GB | archive/review at 3 GB; no uncontrolled event payloads                    |
+| R2 storage             |             5 GB | no new upload path without review                                         |
+| R2 Class B/month       |        2,000,000 | cache/resize/review before 5,000,000                                      |
+| GitHub Actions/month   |          600 min | reduce matrix/E2E frequency before 1,000 min                              |
+| Actions artifacts      |  100 MB retained | short retention; no bulky screenshots/videos by default                   |
 
 The application cannot know all provider-account totals perfectly. Operational thresholds combine application counters, provider analytics, and manual dashboard checks.
+
+The preview Worker intentionally uses a more conservative fast kill switch than the planning table:
+50,000 requests and 40,000 writes per window, with degraded mode at 32,500/28,000 and read-only
+mode at 40,000/36,000. These are per-isolate application safeguards, not a replacement for
+account-wide Cloudflare analytics or D1 usage checks.
 
 ## Illustrative closed-alpha capacity model
 

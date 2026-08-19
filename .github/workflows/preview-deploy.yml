@@ -1,0 +1,52 @@
+name: Project Neverlight Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      worker_name:
+        description: 'Lowercase DNS-safe preview Worker name'
+        required: true
+        default: project-neverlight-preview
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-neverlight-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy and verify protected preview
+    environment:
+      name: preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Deploy isolated preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIEW_D1_DATABASE_ID: ${{ vars.PREVIEW_D1_DATABASE_ID }}
+          PREVIEW_D1_DATABASE_NAME: ${{ vars.PREVIEW_D1_DATABASE_NAME }}
+          PREVIEW_WORKER_NAME: ${{ inputs.worker_name }}
+        run: pnpm deploy:preview
+      - name: Smoke check
+        env:
+          PREVIEW_URL: ${{ vars.PREVIEW_URL }}
+        run: pnpm smoke:preview
+      - name: Abuse safety check
+        env:
+          PREVIEW_URL: ${{ vars.PREVIEW_URL }}
+        run: pnpm test:abuse -- --target preview-safe-suite

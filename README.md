@@ -2,7 +2,7 @@
 
 > **Working codename / internal blueprint. The public title is not cleared.**
 
-Project Neverlight is a clean-room, original-IP browser RPG inspired by the *feel* of early Japanese mobile web games: still images, concise text, numbered commands, asynchronous community, and a satisfying “tap a few times, make progress” loop.
+Project Neverlight is a clean-room, original-IP browser RPG inspired by the _feel_ of early Japanese mobile web games: still images, concise text, numbered commands, asynchronous community, and a satisfying “tap a few times, make progress” loop.
 
 It is **not** a remake, port, private server, or continuation of any existing title. No original assets, names, story, maps, code, databases, UI captures, or proprietary data may enter this repository.
 
@@ -34,6 +34,7 @@ A free-first, mobile-and-PC browser hack-and-slash RPG where players explore thr
 - Codex copy-paste commands: [`docs/17_CODEX_COMMANDS_JA.md`](docs/17_CODEX_COMMANDS_JA.md)
 - Requirement traceability: [`docs/15_REQUIREMENTS_TRACEABILITY.md`](docs/15_REQUIREMENTS_TRACEABILITY.md)
 - Zero-spend budget: [`docs/16_FREE_TIER_BUDGET.md`](docs/16_FREE_TIER_BUDGET.md)
+- Preview operations: [`docs/18_PREVIEW_OPERATIONS.md`](docs/18_PREVIEW_OPERATIONS.md)
 
 ## Proposed repository layout
 
@@ -209,6 +210,29 @@ items require explicit confirmation before salvage. Equip, mark, and salvage mut
 an idempotency key, and the current inventory version; item mint/consume events are append-only in
 `economy_ledger`. Derived stats are computed by the server's deterministic game-core rules and shown
 with item-by-item explanations. No paid slots, premium currency, rerolls, or player trade are enabled.
+
+### Capped Cloudflare preview
+
+The preview environment is manual and protected. It uses a separately provisioned, non-production D1
+database and conservative application budgets; it is not an automatic deployment for unreviewed pull
+requests. A human with Cloudflare access must place the preview D1 UUID in the protected GitHub
+`preview` environment as `PREVIEW_D1_DATABASE_ID` and keep the API token in a GitHub secret. See
+[`docs/18_PREVIEW_OPERATIONS.md`](docs/18_PREVIEW_OPERATIONS.md) before provisioning anything.
+
+Safe local checks do not contact Cloudflare:
+
+```bash
+pnpm --filter @neverlight/worker run dev:preview
+pnpm smoke:preview
+pnpm test:abuse -- --target preview-safe-suite
+pnpm --filter @neverlight/worker run budget:drill
+pnpm deploy:preview -- --dry-run
+```
+
+For an approved, authenticated deployment, set the protected environment variables and run
+`pnpm deploy:preview`; then run the smoke and abuse checks against the deployed `PREVIEW_URL`.
+Never put `CLOUDFLARE_API_TOKEN`, a D1 UUID, or other deployment secrets in source, browser code,
+logs, or artifacts.
 
 ## Launch stance
 

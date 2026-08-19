@@ -6,12 +6,12 @@ import type {
   GuestDataRepository,
   InventoryDataRepository,
 } from '@neverlight/db';
+import type { OperationalEnvironment } from './operations.js';
 
-export interface WorkerBindings {
+export interface WorkerBindings extends OperationalEnvironment {
   DB: D1Database;
   ENVIRONMENT?: string;
   VERSION?: string;
-  READ_ONLY?: string;
 }
 
 export type WorkerDatabaseBoundary = D1RepositoryBoundary;

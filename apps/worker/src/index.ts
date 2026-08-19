@@ -54,11 +54,18 @@ import type {
   WorkerRepository,
   WorkerRepositoryFactory,
 } from './types.js';
+import {
+  BudgetTracker,
+  operationMessage,
+  type BudgetSnapshot,
+  type OperationalMode,
+} from './operations.js';
 
 type WorkerEnvironment = {
   Bindings: WorkerBindings;
   Variables: {
     requestId: string;
+    budgetSnapshot: BudgetSnapshot;
   };
 };
 
@@ -83,11 +90,24 @@ const defaultRepositoryFactory: WorkerRepositoryFactory = (env) => createD1Guest
 
 export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRepositoryFactory) {
   const app = new Hono<WorkerEnvironment>();
+  const budgetTracker = new BudgetTracker();
 
   app.use('*', async (context, next) => {
     const id = requestId();
     context.set('requestId', id);
     context.header('X-Request-Id', id);
+    const budgetSnapshot = budgetTracker.observe(context.env, context.req.method, context.req.path);
+    context.set('budgetSnapshot', budgetSnapshot);
+    if (
+      budgetSnapshot.mode === 'maintenance' &&
+      context.req.path !== '/api/health' &&
+      context.req.path !== '/api/v1/operations'
+    ) {
+      return errorResponse(context, 503, 'MAINTENANCE', operationMessage('maintenance'), {
+        'Retry-After': '300',
+        'Cache-Control': 'no-store',
+      });
+    }
     await next();
   });
 
@@ -120,13 +140,24 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
   });
 
   app.get('/api/v1/operations', (context) => {
-    const readOnly = isReadOnly(context.env);
+    const budget = context.get('budgetSnapshot');
     return context.json({
-      mode: readOnly ? 'read-only' : 'normal',
-      writable: !readOnly,
-      message: readOnly
-        ? '現在は読み取り専用です。現在地の確認と退出案内だけ利用できます。'
-        : '通常運用です。サーバー権威の操作を受け付けます。',
+      budget: {
+        requestCount: budget.requestCount,
+        writeCount: budget.writeCount,
+        requestLimit: budget.settings.requestLimit,
+        writeLimit: budget.settings.writeLimit,
+        degradedRequests: budget.settings.degradedRequests,
+        readOnlyRequests: budget.settings.readOnlyRequests,
+        degradedWrites: budget.settings.degradedWrites,
+        readOnlyWrites: budget.settings.readOnlyWrites,
+        windowStartedAt: budget.windowStartedAt,
+        windowResetsAt: budget.windowResetsAt,
+      },
+      mode: budget.mode,
+      reason: budget.reason,
+      writable: budget.mode === 'normal' || budget.mode === 'degraded',
+      message: operationMessage(budget.mode),
     });
   });
 
@@ -955,19 +986,19 @@ const app = createApp();
 
 export default app;
 
-function isReadOnly(environment: WorkerBindings): boolean {
-  return environment.READ_ONLY === 'true' || environment.READ_ONLY === '1';
-}
-
 function ensureWritable(context: WorkerContext): Response | null {
-  if (!isReadOnly(context.env)) return null;
-  return errorResponse(
-    context,
-    503,
-    'READ_ONLY',
-    '現在は読み取り専用です。現在地の確認と退出案内だけ利用できます。',
-    { 'Retry-After': '60', 'Cache-Control': 'no-store' },
-  );
+  const mode: OperationalMode = context.get('budgetSnapshot').mode;
+  if (mode === 'normal' || mode === 'degraded') return null;
+  if (mode === 'maintenance') {
+    return errorResponse(context, 503, 'MAINTENANCE', operationMessage('maintenance'), {
+      'Retry-After': '300',
+      'Cache-Control': 'no-store',
+    });
+  }
+  return errorResponse(context, 503, 'READ_ONLY', operationMessage('read-only'), {
+    'Retry-After': '60',
+    'Cache-Control': 'no-store',
+  });
 }
 
 function randomSeed(): number {
