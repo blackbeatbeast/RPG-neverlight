@@ -5,11 +5,24 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import {
   createD1GuestRepository,
   GuestRepositoryError,
+  type ExplorationMutationInput,
+  type ExplorationRunView,
   type AuthenticatedSession,
   type GuestDataRepository,
   type GuestSessionInput,
   type PlayerPreferences,
 } from '@neverlight/db';
+
+import {
+  COMBAT_RULESET_VERSION,
+  CombatInputError,
+  createCombatState,
+  resolveCombat,
+  type CombatCommand,
+  type CombatResolution,
+  type CombatState,
+  type EnemyPattern,
+} from '@neverlight/game-core';
 
 import {
   clearCookie,
@@ -43,6 +56,13 @@ type WorkerContext = Context<WorkerEnvironment>;
 type PreferencePatch = Partial<PlayerPreferences>;
 
 const PREFERENCE_ACTION = 'player.preferences.update';
+const ROUTE_ID = 'rain-tower';
+const ROUTE_VERSION = '1.0.0';
+const ROUTE_TTL_SECONDS = 60 * 30;
+const ROUTE_START_ACTION = 'route.start';
+const ROUTE_CHOOSE_ACTION = 'route.choose';
+const COMBAT_RESOLVE_ACTION = 'route.combat.resolve';
+const ROUTE_EXIT_ACTION = 'route.exit';
 
 const defaultRepositoryFactory: WorkerRepositoryFactory = (env) => createD1GuestRepository(env.DB);
 
@@ -84,7 +104,335 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
     return context.json(response);
   });
 
+  app.get('/api/v1/operations', (context) => {
+    const readOnly = isReadOnly(context.env);
+    return context.json({
+      mode: readOnly ? 'read-only' : 'normal',
+      writable: !readOnly,
+      message: readOnly
+        ? '現在は読み取り専用です。現在地の確認と退出案内だけ利用できます。'
+        : '通常運用です。サーバー権威の操作を受け付けます。',
+    });
+  });
+
+  app.post('/api/v1/routes/rain-tower/start', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    if (!(await hasCsrf(context, session))) {
+      return errorResponse(
+        context,
+        403,
+        'CSRF_INVALID',
+        '安全確認に失敗しました。ページを更新してください。',
+      );
+    }
+    const idempotencyKey = context.req.header('Idempotency-Key');
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(
+        context,
+        400,
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key が必要です。',
+      );
+    }
+    const body = await readJson(context);
+    if (!body.ok) return errorResponse(context, 400, 'INVALID_JSON', body.message);
+    const empty = parseEmptyObject(body.value);
+    if (!empty.ok) return errorResponse(context, 400, 'INVALID_ROUTE_REQUEST', empty.message);
+    if (!(await allowRate(repository, ROUTE_START_ACTION, session.accountId, 10, 60))) {
+      return errorResponse(
+        context,
+        429,
+        'RATE_LIMITED',
+        '探索開始が多すぎます。少し待ってください。',
+        {
+          'Retry-After': '60',
+        },
+      );
+    }
+
+    const routeSeed = randomSeed();
+    const input: ExplorationMutationInput = {
+      accountId: session.accountId,
+      playerId: session.playerId,
+      action: ROUTE_START_ACTION,
+      idempotencyKey,
+      inputHash: await sha256Hex(stableJson({ routeId: ROUTE_ID, request: empty.value })),
+      now: nowIso(),
+      expiresAt: futureIso(ROUTE_TTL_SECONDS),
+      routeRunId: createOpaqueId('route'),
+      routeId: ROUTE_ID,
+      routeVersion: ROUTE_VERSION,
+      routeSeed,
+      routeSeedHash: await sha256Hex(`route:${routeSeed}`),
+    };
+    try {
+      const result = await repository.startRoute(input);
+      if (result.replayed) context.header('Idempotency-Replayed', 'true');
+      context.header('Cache-Control', 'no-store');
+      logEvent(context, ROUTE_START_ACTION, result.replayed ? 'replayed' : 'created');
+      return context.json(
+        { route: publicRoute(result.run), replayed: result.replayed },
+        result.replayed ? 200 : 201,
+      );
+    } catch (error) {
+      return repositoryErrorResponse(context, error);
+    }
+  });
+
+  app.get('/api/v1/routes/current', async (context) => {
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    const route = await repository.getCurrentRoute(session.playerId, nowIso());
+    context.header('Cache-Control', 'no-store');
+    return context.json({ route: route ? publicRoute(route) : null });
+  });
+
+  app.post('/api/v1/routes/current/choose', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    if (!(await hasCsrf(context, session))) {
+      return errorResponse(
+        context,
+        403,
+        'CSRF_INVALID',
+        '安全確認に失敗しました。ページを更新してください。',
+      );
+    }
+    const idempotencyKey = context.req.header('Idempotency-Key');
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(
+        context,
+        400,
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key が必要です。',
+      );
+    }
+    const body = await readJson(context);
+    if (!body.ok) return errorResponse(context, 400, 'INVALID_JSON', body.message);
+    const parsed = parseChooseRequest(body.value);
+    if (!parsed.ok) return errorResponse(context, parsed.status, parsed.code, parsed.message);
+    if (!(await allowRate(repository, ROUTE_CHOOSE_ACTION, session.accountId, 30, 60))) {
+      return errorResponse(
+        context,
+        429,
+        'RATE_LIMITED',
+        '遭遇選択が多すぎます。少し待ってください。',
+        {
+          'Retry-After': '60',
+        },
+      );
+    }
+    const current = await repository.getCurrentRoute(session.playerId, nowIso());
+    if (!current)
+      return errorResponse(context, 404, 'ROUTE_NOT_FOUND', '探索ルートが見つかりません。');
+    const encounterSeed = randomSeed();
+    const pattern: EnemyPattern = 'heavy-telegraph';
+    const input: ExplorationMutationInput = {
+      accountId: session.accountId,
+      playerId: session.playerId,
+      action: ROUTE_CHOOSE_ACTION,
+      idempotencyKey,
+      inputHash: await sha256Hex(stableJson(parsed.value)),
+      now: nowIso(),
+      expiresAt: futureIso(ROUTE_TTL_SECONDS),
+      routeRunId: current.routeRunId,
+      expectedVersion: parsed.value.expectedVersion,
+      nodeId: parsed.value.nodeId,
+      encounterId: createOpaqueId('encounter'),
+      encounterVersion: '1.0.0',
+      pattern,
+      encounterSeed,
+      encounterSeedHash: await sha256Hex(`encounter:${encounterSeed}`),
+      combatState: createFixtureCombatState(pattern),
+    };
+    try {
+      const result = await repository.chooseNode(input);
+      if (result.replayed) context.header('Idempotency-Replayed', 'true');
+      context.header('Cache-Control', 'no-store');
+      logEvent(context, ROUTE_CHOOSE_ACTION, result.replayed ? 'replayed' : 'encounter_created');
+      return context.json({ route: publicRoute(result.run), replayed: result.replayed });
+    } catch (error) {
+      return repositoryErrorResponse(context, error);
+    }
+  });
+
+  app.post('/api/v1/routes/current/combat', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    if (!(await hasCsrf(context, session))) {
+      return errorResponse(
+        context,
+        403,
+        'CSRF_INVALID',
+        '安全確認に失敗しました。ページを更新してください。',
+      );
+    }
+    const idempotencyKey = context.req.header('Idempotency-Key');
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(
+        context,
+        400,
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key が必要です。',
+      );
+    }
+    const body = await readJson(context);
+    if (!body.ok) return errorResponse(context, 400, 'INVALID_JSON', body.message);
+    const parsed = parseCombatRequest(body.value);
+    if (!parsed.ok) return errorResponse(context, parsed.status, parsed.code, parsed.message);
+    if (!(await allowRate(repository, COMBAT_RESOLVE_ACTION, session.accountId, 60, 60))) {
+      return errorResponse(
+        context,
+        429,
+        'RATE_LIMITED',
+        '戦闘解決が多すぎます。少し待ってください。',
+        {
+          'Retry-After': '60',
+        },
+      );
+    }
+    const current = await repository.getCurrentRoute(session.playerId, nowIso());
+    if (!current?.encounter || current.serverSeed === null) {
+      return errorResponse(context, 409, 'INVALID_ROUTE', '現在は戦闘入力を受け付けられません。');
+    }
+
+    let resolution: CombatResolution;
+    try {
+      resolution = resolveCombat({
+        commands: parsed.value.commands,
+        rulesetVersion: COMBAT_RULESET_VERSION,
+        seed: current.serverSeed,
+        state: current.encounter.combatState as CombatState,
+      });
+    } catch (error) {
+      if (error instanceof CombatInputError) {
+        return errorResponse(context, 400, 'INVALID_COMBAT_COMMAND', error.message);
+      }
+      throw error;
+    }
+
+    const now = nowIso();
+    const phase = resolution.state.outcome === 'ongoing' ? 'encounter' : 'result';
+    const input: ExplorationMutationInput = {
+      accountId: session.accountId,
+      playerId: session.playerId,
+      action: COMBAT_RESOLVE_ACTION,
+      idempotencyKey,
+      inputHash: await sha256Hex(stableJson(parsed.value)),
+      now,
+      expiresAt: futureIso(ROUTE_TTL_SECONDS),
+      routeRunId: current.routeRunId,
+      expectedVersion: parsed.value.expectedVersion,
+      encounterId: current.encounter.encounterId,
+      combatState: resolution.state,
+      resolutionId: createOpaqueId('resolution'),
+      resolution,
+      rulesetVersion: resolution.rulesetVersion,
+      combatSeed: resolution.seed,
+      inputStateHash: resolution.inputStateHash,
+      outputStateHash: resolution.outputStateHash,
+      resolutionHash: resolution.resolutionHash,
+      phase,
+    };
+    try {
+      const result = await repository.resolveCombat(input);
+      if (result.replayed) context.header('Idempotency-Replayed', 'true');
+      context.header('Cache-Control', 'no-store');
+      logEvent(context, COMBAT_RESOLVE_ACTION, result.replayed ? 'replayed' : phase);
+      return context.json({
+        route: publicRoute(result.run),
+        resolution: result.replayed
+          ? publicResolutionValue(result.run.encounter?.lastResolution)
+          : publicResolution(resolution),
+        replayed: result.replayed,
+      });
+    } catch (error) {
+      return repositoryErrorResponse(context, error);
+    }
+  });
+
+  app.post('/api/v1/routes/current/exit', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    if (!(await hasCsrf(context, session))) {
+      return errorResponse(
+        context,
+        403,
+        'CSRF_INVALID',
+        '安全確認に失敗しました。ページを更新してください。',
+      );
+    }
+    const idempotencyKey = context.req.header('Idempotency-Key');
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(
+        context,
+        400,
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key が必要です。',
+      );
+    }
+    const body = await readJson(context);
+    if (!body.ok) return errorResponse(context, 400, 'INVALID_JSON', body.message);
+    const parsed = parseExitRequest(body.value);
+    if (!parsed.ok) return errorResponse(context, parsed.status, parsed.code, parsed.message);
+    if (!(await allowRate(repository, ROUTE_EXIT_ACTION, session.accountId, 30, 60))) {
+      return errorResponse(
+        context,
+        429,
+        'RATE_LIMITED',
+        '退出操作が多すぎます。少し待ってください。',
+        {
+          'Retry-After': '60',
+        },
+      );
+    }
+    const current = await repository.getCurrentRoute(session.playerId, nowIso());
+    if (!current)
+      return errorResponse(context, 404, 'ROUTE_NOT_FOUND', '探索ルートが見つかりません。');
+    const input: ExplorationMutationInput = {
+      accountId: session.accountId,
+      playerId: session.playerId,
+      action: ROUTE_EXIT_ACTION,
+      idempotencyKey,
+      inputHash: await sha256Hex(stableJson(parsed.value)),
+      now: nowIso(),
+      expiresAt: futureIso(ROUTE_TTL_SECONDS),
+      routeRunId: current.routeRunId,
+      expectedVersion: parsed.value.expectedVersion,
+    };
+    try {
+      const result = await repository.exitRoute(input);
+      if (result.replayed) context.header('Idempotency-Replayed', 'true');
+      context.header('Cache-Control', 'no-store');
+      logEvent(context, ROUTE_EXIT_ACTION, result.replayed ? 'replayed' : 'complete');
+      return context.json({ route: publicRoute(result.run), replayed: result.replayed });
+    } catch (error) {
+      return repositoryErrorResponse(context, error);
+    }
+  });
+
   app.post('/api/v1/guest/start', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
     const repository = repositoryFactory(context.env);
     const cookies = parseCookies(context.req.header('Cookie'));
     const existing = await authenticateSession(repository, cookies[SESSION_COOKIE_NAME]);
@@ -159,6 +507,8 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
   });
 
   app.put('/api/v1/player/preferences', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
     const repository = repositoryFactory(context.env);
     const session = await requireSession(context, repository);
     if (!session)
@@ -220,6 +570,8 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
   });
 
   app.post('/api/v1/session/logout', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
     const repository = repositoryFactory(context.env);
     const session = await requireSession(context, repository);
     if (!session)
@@ -240,6 +592,8 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
   });
 
   app.post('/api/v1/guest/reset', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
     const repository = repositoryFactory(context.env);
     const session = await requireSession(context, repository);
     if (!session)
@@ -285,6 +639,237 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
 const app = createApp();
 
 export default app;
+
+function isReadOnly(environment: WorkerBindings): boolean {
+  return environment.READ_ONLY === 'true' || environment.READ_ONLY === '1';
+}
+
+function ensureWritable(context: WorkerContext): Response | null {
+  if (!isReadOnly(context.env)) return null;
+  return errorResponse(
+    context,
+    503,
+    'READ_ONLY',
+    '現在は読み取り専用です。現在地の確認と退出案内だけ利用できます。',
+    { 'Retry-After': '60', 'Cache-Control': 'no-store' },
+  );
+}
+
+function randomSeed(): number {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return values[0] ?? 0;
+}
+
+function createFixtureCombatState(pattern: EnemyPattern): CombatState {
+  const state = createCombatState(pattern);
+  const enemy = state.enemies[0];
+  if (enemy) {
+    // The vertical-slice fixture is intentionally one short readable encounter; live balance is deferred.
+    enemy.maxVitality = 15;
+    enemy.vitality = 15;
+  }
+  return state;
+}
+
+function publicRoute(route: ExplorationRunView): Omit<ExplorationRunView, 'serverSeed'> {
+  const { serverSeed, ...withoutServerSeed } = route;
+  void serverSeed;
+  return {
+    ...withoutServerSeed,
+    encounter: withoutServerSeed.encounter
+      ? {
+          ...withoutServerSeed.encounter,
+          lastResolution: publicResolutionValue(withoutServerSeed.encounter.lastResolution),
+        }
+      : null,
+  };
+}
+
+function publicResolutionValue(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const candidate = value as Partial<CombatResolution>;
+  if (!Array.isArray(candidate.events) || typeof candidate.resolutionHash !== 'string')
+    return value;
+  return publicResolution(candidate as CombatResolution);
+}
+
+function publicResolution(resolution: CombatResolution): Omit<CombatResolution, 'seed'> {
+  const { seed, ...withoutSeed } = resolution;
+  void seed;
+  return {
+    ...withoutSeed,
+    events: resolution.events.map((event) => ({
+      ...event,
+      data: Object.fromEntries(Object.entries(event.data).filter(([key]) => key !== 'seed')),
+    })),
+  };
+}
+
+type RequestParseResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; status: ContentfulStatusCode; code: string; message: string };
+
+type EmptyRequest = Record<string, never>;
+type ExpectedVersionRequest = { expectedVersion: number };
+type ChooseRequest = ExpectedVersionRequest & { nodeId: 'encounter' };
+type CombatRequest = ExpectedVersionRequest & { commands: CombatCommand[] };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function parseEmptyObject(value: unknown): RequestParseResult<EmptyRequest> {
+  if (!isRecord(value) || Object.keys(value).length !== 0) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_ROUTE_REQUEST',
+      message: '空のJSONオブジェクトだけ指定できます。',
+    };
+  }
+  return { ok: true, value: {} };
+}
+
+function parseExpectedVersion(value: unknown): number | null {
+  if (!Number.isSafeInteger(value) || typeof value !== 'number' || value < 1 || value > 1_000_000) {
+    return null;
+  }
+  return value;
+}
+
+function parseChooseRequest(value: unknown): RequestParseResult<ChooseRequest> {
+  if (!isRecord(value) || !hasExactKeys(value, ['expectedVersion', 'nodeId'])) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_ROUTE_REQUEST',
+      message: 'ルート選択の形式が不正です。',
+    };
+  }
+  const expectedVersion = parseExpectedVersion(value.expectedVersion);
+  if (expectedVersion === null || value.nodeId !== 'encounter') {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_ROUTE_REQUEST',
+      message: 'ルート選択が不正です。',
+    };
+  }
+  return { ok: true, value: { expectedVersion, nodeId: 'encounter' } };
+}
+
+function parseExitRequest(value: unknown): RequestParseResult<ExpectedVersionRequest> {
+  if (!isRecord(value) || !hasExactKeys(value, ['expectedVersion'])) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_ROUTE_REQUEST',
+      message: '退出要求の形式が不正です。',
+    };
+  }
+  const expectedVersion = parseExpectedVersion(value.expectedVersion);
+  if (expectedVersion === null) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_ROUTE_REQUEST',
+      message: 'versionが不正です。',
+    };
+  }
+  return { ok: true, value: { expectedVersion } };
+}
+
+function parseCombatRequest(value: unknown): RequestParseResult<CombatRequest> {
+  if (!isRecord(value) || !hasExactKeys(value, ['commands', 'expectedVersion'])) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_COMBAT_COMMAND',
+      message: '戦闘要求の形式が不正です。',
+    };
+  }
+  const expectedVersion = parseExpectedVersion(value.expectedVersion);
+  if (
+    expectedVersion === null ||
+    !Array.isArray(value.commands) ||
+    value.commands.length < 1 ||
+    value.commands.length > 3
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_COMBAT_COMMAND',
+      message: '命令は1〜3件で指定してください。',
+    };
+  }
+  const commands: CombatCommand[] = [];
+  for (const command of value.commands) {
+    const parsed = parseCombatCommand(command);
+    if (!parsed) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'INVALID_COMBAT_COMMAND',
+        message: '命令の形式が不正です。',
+      };
+    }
+    commands.push(parsed);
+  }
+  return { ok: true, value: { expectedVersion, commands } };
+}
+
+function parseCombatCommand(value: unknown): CombatCommand | null {
+  if (!isRecord(value) || typeof value.type !== 'string') return null;
+  if (value.type === 'guard' || value.type === 'flee') {
+    return hasExactKeys(value, ['type']) ? { type: value.type } : null;
+  }
+  if (value.type === 'strike') {
+    return hasExactKeys(value, ['type', 'targetId']) && isSafeClientId(value.targetId)
+      ? { type: 'strike', targetId: value.targetId }
+      : null;
+  }
+  if (value.type === 'skill') {
+    if (!hasExactKeys(value, ['skillId', 'targetId', 'type']) || !isSafeClientId(value.targetId))
+      return null;
+    if (value.skillId !== 'piercing-lunge' && value.skillId !== 'ward-break') return null;
+    return { type: 'skill', skillId: value.skillId, targetId: value.targetId };
+  }
+  if (value.type === 'item') {
+    if (!hasExactKeys(value, ['itemId', 'targetId', 'type']) || value.itemId !== 'field-draught')
+      return null;
+    return isSafeClientId(value.targetId)
+      ? { type: 'item', itemId: 'field-draught', targetId: value.targetId }
+      : null;
+  }
+  if (value.type === 'shift') {
+    if (!hasExactKeys(value, ['stance', 'type'])) return null;
+    if (
+      value.stance !== 'balanced' &&
+      value.stance !== 'aggressive' &&
+      value.stance !== 'defensive'
+    ) {
+      return null;
+    }
+    return { type: 'shift', stance: value.stance };
+  }
+  return null;
+}
+
+function isSafeClientId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= 1 &&
+    value.length <= 80 &&
+    /^[A-Za-z0-9._-]+$/.test(value)
+  );
+}
 
 async function createSessionInput(input: {
   accountId: string;
@@ -499,6 +1084,12 @@ function repositoryErrorResponse(context: WorkerContext, error: unknown): Respon
     IDEMPOTENCY_IN_PROGRESS: [409, '同じ操作が処理中です。同じキーで再試行してください。'],
     PLAYER_STATE_CONFLICT: [409, 'プレイヤー状態が更新されました。最新状態を取得してください。'],
     PLAYER_NOT_FOUND: [404, 'プレイヤーが見つかりません。'],
+    ROUTE_NOT_FOUND: [404, '探索ルートが見つかりません。'],
+    ROUTE_STATE_CONFLICT: [409, '探索状態が更新されました。最新状態を取得してください。'],
+    ROUTE_EXPIRED: [410, '探索ルートの期限が切れました。街へ戻ってください。'],
+    INVALID_ROUTE: [409, '探索状態の順序が不正です。最新状態を取得してください。'],
+    ENCOUNTER_NOT_FOUND: [404, '遭遇が見つかりません。'],
+    INVALID_COMBAT_STATE: [400, '戦闘状態を読み取れません。'],
   };
   const [status, message] = mapping[error.code];
   return errorResponse(context, status, error.code, message);

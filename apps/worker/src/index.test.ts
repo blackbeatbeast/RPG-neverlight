@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type ExplorationDataRepository,
+  type ExplorationMutationInput,
+  type ExplorationRunView,
   FEATURE_FLAG_KEYS,
   GuestRepositoryError,
   type AuthenticatedSession,
@@ -8,6 +11,7 @@ import {
   type GuestSessionInput,
   type PlayerView,
   type RateLimitInput,
+  type StoredExplorationMutationResult,
   type StoredMutationResult,
   type UpdatePreferencesInput,
 } from '@neverlight/db';
@@ -21,7 +25,7 @@ const env = {
   VERSION: 'test',
 } satisfies WorkerBindings;
 
-class MemoryGuestRepository implements GuestDataRepository {
+class MemoryGuestRepository implements GuestDataRepository, ExplorationDataRepository {
   readonly players = new Map<string, PlayerView>();
   readonly sessions = new Map<
     string,
@@ -29,6 +33,9 @@ class MemoryGuestRepository implements GuestDataRepository {
   >();
   readonly idempotency = new Map<string, { inputHash: string; player: PlayerView }>();
   readonly rates = new Map<string, number>();
+  readonly routes = new Map<string, ExplorationRunView>();
+  readonly routePlayers = new Map<string, string>();
+  readonly routeIdempotency = new Map<string, { inputHash: string; run: ExplorationRunView }>();
 
   async authenticateSession(tokenHash: string, now: string): Promise<AuthenticatedSession | null> {
     const session = [...this.sessions.values()].find(
@@ -111,6 +118,12 @@ class MemoryGuestRepository implements GuestDataRepository {
       if (session.accountId === accountId) this.sessions.delete(id);
     }
     for (const playerId of playerIds) this.players.delete(playerId);
+    for (const [routeRunId, playerId] of this.routePlayers) {
+      if (playerIds.includes(playerId)) {
+        this.routes.delete(routeRunId);
+        this.routePlayers.delete(routeRunId);
+      }
+    }
   }
 
   async updatePreferences(input: UpdatePreferencesInput): Promise<StoredMutationResult> {
@@ -143,6 +156,164 @@ class MemoryGuestRepository implements GuestDataRepository {
     this.rates.set(key, count);
     return count <= input.limit;
   }
+
+  async getCurrentRoute(playerId: string, now: string): Promise<ExplorationRunView | null> {
+    const matches = [...this.routes.entries()]
+      .filter(([routeRunId]) => this.routePlayers.get(routeRunId) === playerId)
+      .map(([, route]) => route);
+    const current = matches.at(-1);
+    if (!current) return null;
+    const result = clone(current);
+    if (result.phase !== 'complete' && result.expiresAt <= now) result.phase = 'expired';
+    return result;
+  }
+
+  async startRoute(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult> {
+    const replay = this.routeReplay(input);
+    if (replay) return replay;
+    if (
+      input.routeId === undefined ||
+      input.routeVersion === undefined ||
+      input.routeSeed === undefined ||
+      input.routeSeedHash === undefined
+    ) {
+      throw new GuestRepositoryError('INVALID_ROUTE', 'invalid route');
+    }
+    const run: ExplorationRunView = {
+      routeRunId: input.routeRunId,
+      routeId: input.routeId,
+      routeVersion: input.routeVersion,
+      phase: 'exploration',
+      version: 1,
+      nodeId: 'start',
+      expiresAt: input.expiresAt,
+      serverSeed: input.routeSeed,
+      serverSeedHash: input.routeSeedHash,
+      encounter: null,
+    };
+    this.routes.set(run.routeRunId, clone(run));
+    this.routePlayers.set(run.routeRunId, input.playerId);
+    this.routeIdempotency.set(routeKey(input), { inputHash: input.inputHash, run: clone(run) });
+    return { run, replayed: false };
+  }
+
+  async chooseNode(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult> {
+    const replay = this.routeReplay(input);
+    if (replay) return replay;
+    const current = this.routes.get(input.routeRunId);
+    if (!current) throw new GuestRepositoryError('ROUTE_NOT_FOUND', 'missing route');
+    assertMemoryRoute(current, input.expectedVersion, 'exploration');
+    if (
+      input.encounterId === undefined ||
+      input.encounterVersion === undefined ||
+      input.pattern === undefined ||
+      input.encounterSeed === undefined ||
+      input.encounterSeedHash === undefined ||
+      input.combatState === undefined
+    ) {
+      throw new GuestRepositoryError('INVALID_ROUTE', 'invalid encounter');
+    }
+    const run: ExplorationRunView = {
+      ...clone(current),
+      phase: 'encounter',
+      version: current.version + 1,
+      nodeId: 'encounter',
+      serverSeed: input.encounterSeed,
+      serverSeedHash: input.encounterSeedHash,
+      encounter: {
+        encounterId: input.encounterId,
+        encounterVersion: input.encounterVersion,
+        pattern: input.pattern,
+        status: 'active',
+        combatState: clone(input.combatState),
+        lastResolution: null,
+      },
+    };
+    this.routes.set(run.routeRunId, clone(run));
+    this.routePlayers.set(run.routeRunId, input.playerId);
+    this.routeIdempotency.set(routeKey(input), { inputHash: input.inputHash, run: clone(run) });
+    return { run, replayed: false };
+  }
+
+  async resolveCombat(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult> {
+    const replay = this.routeReplay(input);
+    if (replay) return replay;
+    const current = this.routes.get(input.routeRunId);
+    if (!current || !current.encounter)
+      throw new GuestRepositoryError('ROUTE_NOT_FOUND', 'missing route');
+    assertMemoryRoute(current, input.expectedVersion, 'encounter');
+    if (
+      input.encounterId !== current.encounter.encounterId ||
+      input.combatState === undefined ||
+      input.resolution === undefined ||
+      input.phase === undefined
+    ) {
+      throw new GuestRepositoryError('INVALID_COMBAT_STATE', 'invalid combat');
+    }
+    const run: ExplorationRunView = {
+      ...clone(current),
+      phase: input.phase,
+      version: current.version + 1,
+      nodeId: input.phase === 'result' ? 'result' : 'encounter',
+      encounter: {
+        ...clone(current.encounter),
+        status: input.phase === 'result' ? 'resolved' : 'active',
+        combatState: clone(input.combatState),
+        lastResolution: clone(input.resolution),
+      },
+    };
+    this.routes.set(run.routeRunId, clone(run));
+    this.routePlayers.set(run.routeRunId, input.playerId);
+    this.routeIdempotency.set(routeKey(input), { inputHash: input.inputHash, run: clone(run) });
+    return { run, replayed: false };
+  }
+
+  async exitRoute(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult> {
+    const replay = this.routeReplay(input);
+    if (replay) return replay;
+    const current = this.routes.get(input.routeRunId);
+    if (!current) throw new GuestRepositoryError('ROUTE_NOT_FOUND', 'missing route');
+    assertMemoryRoute(current, input.expectedVersion, 'exit');
+    if (current.phase !== 'exploration' && current.phase !== 'result') {
+      throw new GuestRepositoryError('INVALID_ROUTE', 'invalid exit');
+    }
+    const run: ExplorationRunView = {
+      ...clone(current),
+      phase: 'complete',
+      version: current.version + 1,
+      nodeId: 'exit',
+    };
+    this.routes.set(run.routeRunId, clone(run));
+    this.routePlayers.set(run.routeRunId, input.playerId);
+    this.routeIdempotency.set(routeKey(input), { inputHash: input.inputHash, run: clone(run) });
+    return { run, replayed: false };
+  }
+
+  private routeReplay(input: ExplorationMutationInput): StoredExplorationMutationResult | null {
+    const existing = this.routeIdempotency.get(routeKey(input));
+    if (!existing) return null;
+    if (existing.inputHash !== input.inputHash) {
+      throw new GuestRepositoryError('IDEMPOTENCY_KEY_REUSED', 'different input');
+    }
+    return { run: clone(existing.run), replayed: true };
+  }
+}
+
+function routeKey(input: ExplorationMutationInput): string {
+  return `${input.accountId}:${input.action}:${input.idempotencyKey}`;
+}
+
+function assertMemoryRoute(
+  route: ExplorationRunView,
+  expectedVersion: number | undefined,
+  phase: 'exploration' | 'encounter' | 'exit',
+): void {
+  if (route.phase === 'expired') throw new GuestRepositoryError('ROUTE_EXPIRED', 'expired');
+  if (route.phase === 'complete') throw new GuestRepositoryError('INVALID_ROUTE', 'complete');
+  if (expectedVersion !== route.version)
+    throw new GuestRepositoryError('ROUTE_STATE_CONFLICT', 'stale');
+  if (phase !== 'exit' && route.phase !== phase)
+    throw new GuestRepositoryError('INVALID_ROUTE', 'wrong phase');
 }
 
 function clone<T>(value: T): T {
@@ -387,5 +558,150 @@ describe('guest identity and player preferences', () => {
     );
     expect(responses.filter((response) => response.status === 201)).toHaveLength(10);
     expect(responses.at(-1)?.status).toBe(429);
+  });
+});
+
+describe('exploration-to-combat vertical slice', () => {
+  it('persists route versions, rejects forged authority, and replays combat results', async () => {
+    const repository = new MemoryGuestRepository();
+    const app = createApp(() => repository);
+    const started = await app.request('/api/v1/guest/start', { method: 'POST' }, env);
+    const sessionCookie = getCookie(started, 'neverlight_session');
+    const csrfCookie = getCookie(started, 'neverlight_csrf');
+    const headers = {
+      Cookie: cookieHeader(sessionCookie, csrfCookie),
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': cookieValue(csrfCookie),
+    };
+
+    const routeStart = await app.request(
+      '/api/v1/routes/rain-tower/start',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Idempotency-Key': 'route-start-1' },
+        body: '{}',
+      },
+      env,
+    );
+    expect(routeStart.status).toBe(201);
+    const routeStartBody = (await routeStart.json()) as {
+      route: ExplorationRunView;
+    };
+    expect(routeStartBody.route.phase).toBe('exploration');
+    expect(routeStartBody.route.serverSeed).toBeUndefined();
+    expect(routeStartBody.route.serverSeedHash).toMatch(/^([a-f0-9]{64})$/);
+
+    const forged = await app.request(
+      '/api/v1/routes/current/choose',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Idempotency-Key': 'route-forged-1' },
+        body: JSON.stringify({
+          expectedVersion: 1,
+          nodeId: 'encounter',
+          result: { outcome: 'victory' },
+          seed: 1,
+        }),
+      },
+      env,
+    );
+    expect(forged.status).toBe(400);
+
+    const chosen = await app.request(
+      '/api/v1/routes/current/choose',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Idempotency-Key': 'route-choose-1' },
+        body: JSON.stringify({ expectedVersion: 1, nodeId: 'encounter' }),
+      },
+      env,
+    );
+    expect(chosen.status).toBe(200);
+    const chosenBody = (await chosen.json()) as { route: ExplorationRunView };
+    expect(chosenBody.route.phase).toBe('encounter');
+    expect(chosenBody.route.encounter?.status).toBe('active');
+
+    const stale = await app.request(
+      '/api/v1/routes/current/choose',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Idempotency-Key': 'route-choose-stale' },
+        body: JSON.stringify({ expectedVersion: 1, nodeId: 'encounter' }),
+      },
+      env,
+    );
+    expect(stale.status).toBe(409);
+
+    const targetId = chosenBody.route.encounter?.combatState as {
+      enemies: Array<{ id: string }>;
+    };
+    const combatBody = {
+      commands: [
+        { targetId: targetId.enemies[0]?.id, type: 'strike' },
+        { targetId: targetId.enemies[0]?.id, type: 'strike' },
+        { targetId: targetId.enemies[0]?.id, type: 'strike' },
+      ],
+      expectedVersion: 2,
+    };
+    const resolved = await app.request(
+      '/api/v1/routes/current/combat',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Idempotency-Key': 'combat-1' },
+        body: JSON.stringify(combatBody),
+      },
+      env,
+    );
+    expect(resolved.status).toBe(200);
+    const resolvedBody = (await resolved.json()) as {
+      replayed: boolean;
+      resolution: { resolutionHash: string };
+      route: ExplorationRunView;
+    };
+    expect(resolvedBody.replayed).toBe(false);
+    expect(resolvedBody.route.phase).toBe('result');
+    expect(resolvedBody.resolution.resolutionHash).toMatch(/^fnv1a32:/);
+
+    const retried = await app.request(
+      '/api/v1/routes/current/combat',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Idempotency-Key': 'combat-1' },
+        body: JSON.stringify(combatBody),
+      },
+      env,
+    );
+    expect(retried.status).toBe(200);
+    expect(retried.headers.get('Idempotency-Replayed')).toBe('true');
+    await expect(retried.json()).resolves.toMatchObject({
+      replayed: true,
+      route: { phase: 'result' },
+    });
+
+    const exited = await app.request(
+      '/api/v1/routes/current/exit',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Idempotency-Key': 'route-exit-1' },
+        body: JSON.stringify({ expectedVersion: 3 }),
+      },
+      env,
+    );
+    expect(exited.status).toBe(200);
+    await expect(exited.json()).resolves.toMatchObject({ route: { phase: 'complete' } });
+  });
+
+  it('blocks all write paths in read-only mode and exposes a safe status', async () => {
+    const app = createApp(() => new MemoryGuestRepository());
+    const readOnlyEnv = { ...env, READ_ONLY: 'true' };
+    const operations = await app.request('/api/v1/operations', undefined, readOnlyEnv);
+    await expect(operations.json()).resolves.toEqual({
+      message: '現在は読み取り専用です。現在地の確認と退出案内だけ利用できます。',
+      mode: 'read-only',
+      writable: false,
+    });
+    const blocked = await app.request('/api/v1/guest/start', { method: 'POST' }, readOnlyEnv);
+    expect(blocked.status).toBe(503);
+    await expect(blocked.json()).resolves.toMatchObject({ error: { code: 'READ_ONLY' } });
   });
 });

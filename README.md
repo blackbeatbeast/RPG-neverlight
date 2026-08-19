@@ -136,8 +136,8 @@ The expected local response is a JSON object with `ok: true`, service
 ### Local D1 migration
 
 The migrations live in `packages/db/migrations` and are wired into the Worker through a local-only
-Wrangler configuration. `pnpm db:migrate:local` applies the bootstrap marker and the guest/player
-identity schema to local D1:
+Wrangler configuration. `pnpm db:migrate:local` applies the bootstrap marker, guest/player identity,
+and the server-owned exploration vertical-slice schema to local D1:
 
 ```bash
 pnpm db:migrate:local
@@ -149,10 +149,11 @@ pnpm db:migrate:local
 
 This writes only to Wrangler's local `.wrangler/state` directory. Issue #4 creates only guest
 identity, player aggregate, preferences, feature-flag, inventory-location, idempotency, and rate-limit
-scaffolding; it does not create item, card, currency, combat, trade, or social value. To reset local
-state, stop development tools and remove `.wrangler/state` from the Worker directory. To delete one
-guest's data through the API, send `POST /api/v1/guest/reset` with the current CSRF token and an
-`Idempotency-Key`; the Worker deletes the guest account and clears both cookies.
+scaffolding. Issue #6 adds route runs, encounters, and append-only combat resolution records, but no
+real loot, currency, trade, or social value. To reset local state, stop development tools and remove
+`.wrangler/state` from the Worker directory. To delete one guest's data through the API, send
+`POST /api/v1/guest/reset` with the current CSRF token and an `Idempotency-Key`; the Worker deletes the
+guest account and dependent route records, then clears both cookies.
 
 ### Verification commands
 
@@ -165,8 +166,10 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm format:check
+pnpm db:migrate:local
 pnpm combat:replay fixtures/combat/*.json
 pnpm combat:simulate -- --runs 10000
+pnpm test:e2e -- --grep vertical-slice
 ```
 
 The same commands work in Windows PowerShell. `pnpm test` also runs the blueprint check, the fixed
@@ -185,9 +188,11 @@ pnpm test:e2e -- --project=desktop
 
 The browser checks cover the canonical screen flow, numbered keyboard commands, touch buttons,
 input-field shortcut suppression, Retro/Modern command parity, empty/error/maintenance states,
-images-disabled rendering, reduced motion, and 200% zoom reflow. CI installs the same pinned
-Chromium browser using the runner's existing system libraries and uploads the Playwright evidence
-as an artifact.
+images-disabled rendering, reduced motion, and 200% zoom reflow. The Issue #6 `vertical-slice` flow
+also covers guest start, server-selected route/encounter, refresh resume, command resolution, result
+exit, forged seed/result rejection, and read-only guidance. CI installs the same pinned Chromium
+browser using the runner's existing system libraries and uploads the Playwright evidence as an
+artifact.
 
 ## Launch stance
 

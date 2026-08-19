@@ -108,13 +108,91 @@ export interface GuestDataRepository {
   consumeRateLimit(input: RateLimitInput): Promise<boolean>;
 }
 
+export type ExplorationPhase = 'exploration' | 'encounter' | 'result' | 'complete' | 'expired';
+
+export interface ExplorationEncounterView {
+  encounterId: string;
+  encounterVersion: string;
+  pattern: string;
+  status: 'active' | 'resolved';
+  combatState: unknown;
+  lastResolution: unknown | null;
+}
+
+/**
+ * This is an internal repository view. `serverSeed` is deliberately removed by the Worker
+ * response mapper before it crosses the browser trust boundary.
+ */
+export interface ExplorationRunView {
+  routeRunId: string;
+  routeId: string;
+  routeVersion: string;
+  phase: ExplorationPhase;
+  version: number;
+  nodeId: string;
+  expiresAt: string;
+  serverSeed: number | null;
+  serverSeedHash: string | null;
+  encounter: ExplorationEncounterView | null;
+}
+
+export interface ExplorationMutationInput {
+  accountId: string;
+  playerId: string;
+  action: string;
+  idempotencyKey: string;
+  inputHash: string;
+  now: string;
+  expiresAt: string;
+  routeRunId: string;
+  expectedVersion?: number;
+  routeId?: string;
+  routeVersion?: string;
+  nodeId?: string;
+  routeSeed?: number;
+  routeSeedHash?: string;
+  encounterId?: string;
+  encounterVersion?: string;
+  pattern?: string;
+  encounterSeed?: number;
+  encounterSeedHash?: string;
+  combatState?: unknown;
+  resolutionId?: string;
+  resolution?: unknown;
+  rulesetVersion?: string;
+  combatSeed?: number;
+  inputStateHash?: string;
+  outputStateHash?: string;
+  resolutionHash?: string;
+  phase?: Exclude<ExplorationPhase, 'expired'>;
+}
+
+export interface StoredExplorationMutationResult {
+  run: ExplorationRunView;
+  replayed: boolean;
+}
+
+export interface ExplorationDataRepository {
+  getCurrentRoute(playerId: string, now: string): Promise<ExplorationRunView | null>;
+  startRoute(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult>;
+  chooseNode(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult>;
+  resolveCombat(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult>;
+  exitRoute(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult>;
+}
+
 export class GuestRepositoryError extends Error {
   constructor(
     public readonly code:
       | 'IDEMPOTENCY_KEY_REUSED'
       | 'IDEMPOTENCY_IN_PROGRESS'
       | 'PLAYER_STATE_CONFLICT'
-      | 'PLAYER_NOT_FOUND',
+      | 'PLAYER_NOT_FOUND'
+      | 'ROUTE_NOT_FOUND'
+      | 'ROUTE_STATE_CONFLICT'
+      | 'ROUTE_EXPIRED'
+      | 'INVALID_ROUTE'
+      | 'ENCOUNTER_NOT_FOUND'
+      | 'INVALID_COMBAT_STATE',
     message: string,
   ) {
     super(message);
@@ -166,6 +244,44 @@ interface InventoryLocationRow {
 }
 
 interface IdempotencyRow {
+  input_hash: string;
+  response_json: string;
+  expires_at: string;
+}
+
+interface RouteRunRow {
+  route_run_id: string;
+  account_id: string;
+  player_id: string;
+  route_id: string;
+  route_version: string;
+  phase: Exclude<ExplorationPhase, 'expired'>;
+  version: number;
+  node_id: string;
+  encounter_id: string | null;
+  route_seed: number;
+  route_seed_hash: string;
+  expires_at: string;
+}
+
+interface EncounterRow {
+  encounter_id: string;
+  route_run_id: string;
+  encounter_version: string;
+  pattern: string;
+  status: 'active' | 'resolved';
+  encounter_seed: number;
+  encounter_seed_hash: string;
+  combat_state_json: string;
+}
+
+interface ResolutionRow {
+  resolution_id: string;
+  encounter_id: string;
+  resolution_json: string;
+}
+
+interface ExplorationIdempotencyRow {
   input_hash: string;
   response_json: string;
   expires_at: string;
@@ -248,7 +364,51 @@ function preferenceRowFromView(view: PlayerView): PreferencesRow {
   };
 }
 
-export class D1GuestDataRepository implements GuestDataRepository {
+function parseStoredJson(value: string, code: 'INVALID_COMBAT_STATE' | 'ROUTE_NOT_FOUND'): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new GuestRepositoryError(code, '保存された探索状態を読み取れません。');
+  }
+}
+
+function explorationView(
+  route: RouteRunRow,
+  encounter: EncounterRow | null,
+  resolution: ResolutionRow | null,
+  now: string,
+): ExplorationRunView {
+  const expired = route.phase !== 'complete' && route.expires_at <= now;
+  return {
+    routeRunId: route.route_run_id,
+    routeId: route.route_id,
+    routeVersion: route.route_version,
+    phase: expired ? 'expired' : route.phase,
+    version: route.version,
+    nodeId: route.node_id,
+    expiresAt: route.expires_at,
+    serverSeed: encounter?.encounter_seed ?? route.route_seed,
+    serverSeedHash: encounter?.encounter_seed_hash ?? route.route_seed_hash,
+    encounter: encounter
+      ? {
+          encounterId: encounter.encounter_id,
+          encounterVersion: encounter.encounter_version,
+          pattern: encounter.pattern,
+          status: encounter.status,
+          combatState: parseStoredJson(encounter.combat_state_json, 'INVALID_COMBAT_STATE'),
+          lastResolution: resolution
+            ? parseStoredJson(resolution.resolution_json, 'INVALID_COMBAT_STATE')
+            : null,
+        }
+      : null,
+  };
+}
+
+function explorationViewForStorage(view: ExplorationRunView): string {
+  return JSON.stringify({ ...view, serverSeed: null, serverSeedHash: null });
+}
+
+export class D1GuestDataRepository implements GuestDataRepository, ExplorationDataRepository {
   constructor(private readonly db: D1Database) {}
 
   async authenticateSession(tokenHash: string, now: string): Promise<AuthenticatedSession | null> {
@@ -421,6 +581,17 @@ export class D1GuestDataRepository implements GuestDataRepository {
   async resetGuest(accountId: string): Promise<void> {
     await this.db.batch([
       this.db.prepare('DELETE FROM idempotency_records WHERE account_id = ?').bind(accountId),
+      this.db
+        .prepare(
+          'DELETE FROM combat_resolutions WHERE route_run_id IN (SELECT route_run_id FROM route_runs WHERE account_id = ?)',
+        )
+        .bind(accountId),
+      this.db
+        .prepare(
+          'DELETE FROM encounters WHERE route_run_id IN (SELECT route_run_id FROM route_runs WHERE account_id = ?)',
+        )
+        .bind(accountId),
+      this.db.prepare('DELETE FROM route_runs WHERE account_id = ?').bind(accountId),
       this.db.prepare('DELETE FROM sessions WHERE account_id = ?').bind(accountId),
       this.db
         .prepare(
@@ -571,6 +742,461 @@ export class D1GuestDataRepository implements GuestDataRepository {
     return { player: JSON.parse(stored.response_json) as PlayerView, replayed: false };
   }
 
+  async getCurrentRoute(playerId: string, now: string): Promise<ExplorationRunView | null> {
+    const route = await this.db
+      .prepare(
+        `SELECT route_run_id, account_id, player_id, route_id, route_version, phase, version,
+                node_id, encounter_id, route_seed, route_seed_hash, expires_at
+         FROM route_runs
+         WHERE player_id = ?
+         ORDER BY created_at DESC, route_run_id DESC
+         LIMIT 1`,
+      )
+      .bind(playerId)
+      .first<RouteRunRow>();
+    if (!route) return null;
+    return this.loadExplorationView(route, now);
+  }
+
+  async startRoute(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult> {
+    const replay = await this.claimExplorationIdempotency(input);
+    if (replay) return replay;
+    if (
+      input.routeId === undefined ||
+      input.routeVersion === undefined ||
+      input.routeSeed === undefined ||
+      input.routeSeedHash === undefined
+    ) {
+      await this.releaseExplorationIdempotency(input);
+      throw new GuestRepositoryError('INVALID_ROUTE', 'ルート開始情報が不足しています。');
+    }
+
+    const route: RouteRunRow = {
+      route_run_id: input.routeRunId,
+      account_id: input.accountId,
+      player_id: input.playerId,
+      route_id: input.routeId,
+      route_version: input.routeVersion,
+      phase: 'exploration',
+      version: 1,
+      node_id: 'start',
+      encounter_id: null,
+      route_seed: input.routeSeed,
+      route_seed_hash: input.routeSeedHash,
+      expires_at: input.expiresAt,
+    };
+    const view = explorationView(route, null, null, input.now);
+    try {
+      await this.db.batch([
+        this.db
+          .prepare(
+            `INSERT INTO route_runs (
+               route_run_id, account_id, player_id, route_id, route_version, phase, version,
+               node_id, encounter_id, route_seed, route_seed_hash, expires_at, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, 'exploration', 1, 'start', NULL, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            route.route_run_id,
+            route.account_id,
+            route.player_id,
+            route.route_id,
+            route.route_version,
+            route.route_seed,
+            route.route_seed_hash,
+            route.expires_at,
+            input.now,
+            input.now,
+          ),
+        this.explorationIdempotencyUpdate(input, explorationViewForStorage(view)),
+      ]);
+    } catch (error) {
+      await this.releaseExplorationIdempotency(input);
+      throw error;
+    }
+    return { run: view, replayed: false };
+  }
+
+  async chooseNode(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult> {
+    const replay = await this.claimExplorationIdempotency(input);
+    if (replay) return replay;
+    try {
+      const current = await this.getCurrentRoute(input.playerId, input.now);
+      if (!current || current.routeRunId !== input.routeRunId) {
+        throw new GuestRepositoryError('ROUTE_NOT_FOUND', '探索ルートが見つかりません。');
+      }
+      this.assertMutableRoute(current, input.expectedVersion, 'exploration');
+      if (
+        input.encounterId === undefined ||
+        input.encounterVersion === undefined ||
+        input.pattern === undefined ||
+        input.encounterSeed === undefined ||
+        input.encounterSeedHash === undefined ||
+        input.combatState === undefined
+      ) {
+        throw new GuestRepositoryError('INVALID_ROUTE', '遭遇の開始情報が不足しています。');
+      }
+
+      const encounter: ExplorationEncounterView = {
+        encounterId: input.encounterId,
+        encounterVersion: input.encounterVersion,
+        pattern: input.pattern,
+        status: 'active',
+        combatState: input.combatState,
+        lastResolution: null,
+      };
+      const next: ExplorationRunView = {
+        ...current,
+        phase: 'encounter',
+        version: current.version + 1,
+        nodeId: 'encounter',
+        serverSeed: input.encounterSeed,
+        serverSeedHash: input.encounterSeedHash,
+        encounter,
+      };
+      const result = await this.db.batch([
+        this.db
+          .prepare(
+            `INSERT INTO encounters (
+               encounter_id, route_run_id, encounter_version, pattern, status,
+               encounter_seed, encounter_seed_hash, combat_state_json, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            input.encounterId,
+            input.routeRunId,
+            input.encounterVersion,
+            input.pattern,
+            input.encounterSeed,
+            input.encounterSeedHash,
+            JSON.stringify(input.combatState),
+            input.now,
+            input.now,
+          ),
+        this.db
+          .prepare(
+            `UPDATE route_runs
+             SET phase = 'encounter', version = ?, node_id = 'encounter', encounter_id = ?, updated_at = ?
+             WHERE route_run_id = ? AND player_id = ? AND version = ? AND expires_at > ?`,
+          )
+          .bind(
+            next.version,
+            input.encounterId,
+            input.now,
+            input.routeRunId,
+            input.playerId,
+            current.version,
+            input.now,
+          ),
+        this.explorationIdempotencyUpdate(input, explorationViewForStorage(next)),
+      ]);
+      if (Number(result[1]?.meta.changes ?? 0) !== 1) {
+        throw new GuestRepositoryError(
+          'ROUTE_STATE_CONFLICT',
+          '探索状態が更新されました。最新状態を取得してください。',
+        );
+      }
+      return { run: next, replayed: false };
+    } catch (error) {
+      await this.releaseExplorationIdempotency(input);
+      throw error;
+    }
+  }
+
+  async resolveCombat(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult> {
+    const replay = await this.claimExplorationIdempotency(input);
+    if (replay) return replay;
+    try {
+      const current = await this.getCurrentRoute(input.playerId, input.now);
+      if (!current || current.routeRunId !== input.routeRunId) {
+        throw new GuestRepositoryError('ROUTE_NOT_FOUND', '探索ルートが見つかりません。');
+      }
+      this.assertMutableRoute(current, input.expectedVersion, 'encounter');
+      if (
+        !current.encounter ||
+        input.encounterId !== current.encounter.encounterId ||
+        input.combatState === undefined ||
+        input.resolutionId === undefined ||
+        input.resolution === undefined ||
+        input.rulesetVersion === undefined ||
+        input.combatSeed === undefined ||
+        input.inputStateHash === undefined ||
+        input.outputStateHash === undefined ||
+        input.resolutionHash === undefined ||
+        input.phase === undefined
+      ) {
+        throw new GuestRepositoryError('INVALID_COMBAT_STATE', '戦闘解決情報が不正です。');
+      }
+
+      const next: ExplorationRunView = {
+        ...current,
+        phase: input.phase,
+        version: current.version + 1,
+        nodeId: input.phase === 'result' ? 'result' : 'encounter',
+        encounter: {
+          ...current.encounter,
+          status: input.phase === 'result' ? 'resolved' : 'active',
+          combatState: input.combatState,
+          lastResolution: input.resolution,
+        },
+      };
+      const result = await this.db.batch([
+        this.db
+          .prepare(
+            `UPDATE encounters
+             SET status = ?, combat_state_json = ?, updated_at = ?
+             WHERE encounter_id = ? AND route_run_id = ? AND status = 'active'`,
+          )
+          .bind(
+            next.encounter?.status,
+            JSON.stringify(input.combatState),
+            input.now,
+            input.encounterId,
+            input.routeRunId,
+          ),
+        this.db
+          .prepare(
+            `INSERT INTO combat_resolutions (
+               resolution_id, encounter_id, route_run_id, ruleset_version, combat_seed,
+               input_state_hash, output_state_hash, resolution_hash, resolution_json, created_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            input.resolutionId,
+            input.encounterId,
+            input.routeRunId,
+            input.rulesetVersion,
+            input.combatSeed,
+            input.inputStateHash,
+            input.outputStateHash,
+            input.resolutionHash,
+            JSON.stringify(input.resolution),
+            input.now,
+          ),
+        this.db
+          .prepare(
+            `UPDATE route_runs
+             SET phase = ?, version = ?, node_id = ?, updated_at = ?
+             WHERE route_run_id = ? AND player_id = ? AND version = ? AND expires_at > ?`,
+          )
+          .bind(
+            input.phase,
+            next.version,
+            next.nodeId,
+            input.now,
+            input.routeRunId,
+            input.playerId,
+            current.version,
+            input.now,
+          ),
+        this.explorationIdempotencyUpdate(input, explorationViewForStorage(next)),
+      ]);
+      if (
+        Number(result[0]?.meta.changes ?? 0) !== 1 ||
+        Number(result[2]?.meta.changes ?? 0) !== 1
+      ) {
+        throw new GuestRepositoryError(
+          'ROUTE_STATE_CONFLICT',
+          '戦闘状態が更新されました。最新状態を取得してください。',
+        );
+      }
+      return { run: next, replayed: false };
+    } catch (error) {
+      await this.releaseExplorationIdempotency(input);
+      throw error;
+    }
+  }
+
+  async exitRoute(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult> {
+    const replay = await this.claimExplorationIdempotency(input);
+    if (replay) return replay;
+    try {
+      const current = await this.getCurrentRoute(input.playerId, input.now);
+      if (!current || current.routeRunId !== input.routeRunId) {
+        throw new GuestRepositoryError('ROUTE_NOT_FOUND', '探索ルートが見つかりません。');
+      }
+      this.assertMutableRoute(current, input.expectedVersion, 'exit');
+      if (current.phase !== 'exploration' && current.phase !== 'result') {
+        throw new GuestRepositoryError('INVALID_ROUTE', 'この状態からは退出できません。');
+      }
+      const next: ExplorationRunView = {
+        ...current,
+        phase: 'complete',
+        version: current.version + 1,
+        nodeId: 'exit',
+      };
+      const result = await this.db.batch([
+        this.db
+          .prepare(
+            `UPDATE route_runs
+             SET phase = 'complete', version = ?, node_id = 'exit', updated_at = ?
+             WHERE route_run_id = ? AND player_id = ? AND version = ? AND expires_at > ?`,
+          )
+          .bind(
+            next.version,
+            input.now,
+            input.routeRunId,
+            input.playerId,
+            current.version,
+            input.now,
+          ),
+        this.explorationIdempotencyUpdate(input, explorationViewForStorage(next)),
+      ]);
+      if (Number(result[0]?.meta.changes ?? 0) !== 1) {
+        throw new GuestRepositoryError(
+          'ROUTE_STATE_CONFLICT',
+          '退出状態が更新されました。最新状態を取得してください。',
+        );
+      }
+      return { run: next, replayed: false };
+    } catch (error) {
+      await this.releaseExplorationIdempotency(input);
+      throw error;
+    }
+  }
+
+  private async loadExplorationView(route: RouteRunRow, now: string): Promise<ExplorationRunView> {
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          `SELECT encounter_id, route_run_id, encounter_version, pattern, status,
+                  encounter_seed, encounter_seed_hash, combat_state_json
+           FROM encounters WHERE encounter_id = ?`,
+        )
+        .bind(route.encounter_id),
+      this.db
+        .prepare(
+          `SELECT resolution_id, encounter_id, resolution_json
+           FROM combat_resolutions
+           WHERE encounter_id = ?
+           ORDER BY created_at DESC, resolution_id DESC
+           LIMIT 1`,
+        )
+        .bind(route.encounter_id),
+    ]);
+    const encounter = (results[0]?.results[0] as EncounterRow | undefined) ?? null;
+    const resolution = (results[1]?.results[0] as ResolutionRow | undefined) ?? null;
+    return explorationView(route, encounter, resolution, now);
+  }
+
+  private assertMutableRoute(
+    route: ExplorationRunView,
+    expectedVersion: number | undefined,
+    phase: 'exploration' | 'encounter' | 'exit',
+  ): void {
+    if (route.phase === 'expired') {
+      throw new GuestRepositoryError('ROUTE_EXPIRED', 'この探索ルートは期限切れです。');
+    }
+    if (route.phase === 'complete') {
+      throw new GuestRepositoryError('INVALID_ROUTE', 'この探索ルートは完了しています。');
+    }
+    if (expectedVersion !== route.version) {
+      throw new GuestRepositoryError(
+        'ROUTE_STATE_CONFLICT',
+        '探索状態が更新されました。最新状態を取得してください。',
+      );
+    }
+    if (phase !== 'exit' && route.phase !== phase) {
+      throw new GuestRepositoryError('INVALID_ROUTE', '探索状態の順序が不正です。');
+    }
+  }
+
+  private async claimExplorationIdempotency(
+    input: ExplorationMutationInput,
+  ): Promise<StoredExplorationMutationResult | null> {
+    const existing = await this.getExplorationIdempotency(input);
+    if (existing) {
+      if (existing.input_hash !== input.inputHash) {
+        throw new GuestRepositoryError(
+          'IDEMPOTENCY_KEY_REUSED',
+          '同じIdempotency-Keyに別の内容は指定できません。',
+        );
+      }
+      if (existing.response_json === PENDING_RESPONSE) {
+        throw new GuestRepositoryError(
+          'IDEMPOTENCY_IN_PROGRESS',
+          '同じ操作が処理中です。同じキーで再試行してください。',
+        );
+      }
+      return {
+        run: JSON.parse(existing.response_json) as ExplorationRunView,
+        replayed: true,
+      };
+    }
+
+    const idempotencyWhere = 'account_id = ? AND action = ? AND idempotency_key = ?';
+    const values = [input.accountId, input.action, input.idempotencyKey];
+    const results = await this.db.batch([
+      this.db
+        .prepare(`DELETE FROM idempotency_records WHERE ${idempotencyWhere} AND expires_at <= ?`)
+        .bind(...values, input.now),
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO idempotency_records
+             (account_id, action, idempotency_key, input_hash, response_json, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          input.accountId,
+          input.action,
+          input.idempotencyKey,
+          input.inputHash,
+          PENDING_RESPONSE,
+          input.now,
+          input.expiresAt,
+        ),
+    ]);
+    if (Number(results[1]?.meta.changes ?? 0) === 1) return null;
+
+    const raced = await this.getExplorationIdempotency(input);
+    if (raced?.input_hash !== input.inputHash) {
+      throw new GuestRepositoryError(
+        'IDEMPOTENCY_KEY_REUSED',
+        '同じIdempotency-Keyに別の内容は指定できません。',
+      );
+    }
+    if (!raced || raced.response_json === PENDING_RESPONSE) {
+      throw new GuestRepositoryError(
+        'IDEMPOTENCY_IN_PROGRESS',
+        '同じ操作が処理中です。同じキーで再試行してください。',
+      );
+    }
+    return { run: JSON.parse(raced.response_json) as ExplorationRunView, replayed: true };
+  }
+
+  private explorationIdempotencyUpdate(
+    input: ExplorationMutationInput,
+    responseJson: string,
+  ): D1PreparedStatement {
+    return this.db
+      .prepare(
+        `UPDATE idempotency_records SET response_json = ?
+         WHERE account_id = ? AND action = ? AND idempotency_key = ? AND response_json = ?`,
+      )
+      .bind(responseJson, input.accountId, input.action, input.idempotencyKey, PENDING_RESPONSE);
+  }
+
+  private async releaseExplorationIdempotency(input: ExplorationMutationInput): Promise<void> {
+    await this.db
+      .prepare(
+        `DELETE FROM idempotency_records
+         WHERE account_id = ? AND action = ? AND idempotency_key = ? AND response_json = ?`,
+      )
+      .bind(input.accountId, input.action, input.idempotencyKey, PENDING_RESPONSE)
+      .run();
+  }
+
+  private async getExplorationIdempotency(
+    input: ExplorationMutationInput,
+  ): Promise<ExplorationIdempotencyRow | null> {
+    return this.db
+      .prepare(
+        `SELECT input_hash, response_json, expires_at FROM idempotency_records
+         WHERE account_id = ? AND action = ? AND idempotency_key = ? AND expires_at > ?`,
+      )
+      .bind(input.accountId, input.action, input.idempotencyKey, input.now)
+      .first<ExplorationIdempotencyRow>();
+  }
+
   async consumeRateLimit(input: RateLimitInput): Promise<boolean> {
     const result = await this.db
       .prepare(
@@ -608,6 +1234,6 @@ export class D1GuestDataRepository implements GuestDataRepository {
   }
 }
 
-export function createD1GuestRepository(db: D1Database): GuestDataRepository {
+export function createD1GuestRepository(db: D1Database): D1GuestDataRepository {
   return new D1GuestDataRepository(db);
 }

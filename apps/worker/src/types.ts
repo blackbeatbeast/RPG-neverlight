@@ -1,16 +1,23 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import type { D1RepositoryBoundary, GuestDataRepository } from '@neverlight/db';
+import type {
+  D1RepositoryBoundary,
+  ExplorationDataRepository,
+  GuestDataRepository,
+} from '@neverlight/db';
 
 export interface WorkerBindings {
   DB: D1Database;
   ENVIRONMENT?: string;
   VERSION?: string;
+  READ_ONLY?: string;
 }
 
 export type WorkerDatabaseBoundary = D1RepositoryBoundary;
 
-export type WorkerRepositoryFactory = (env: WorkerBindings) => GuestDataRepository;
+export type WorkerRepository = GuestDataRepository & ExplorationDataRepository;
+
+export type WorkerRepositoryFactory = (env: WorkerBindings) => WorkerRepository;
 
 export interface HealthResponse {
   ok: true;
