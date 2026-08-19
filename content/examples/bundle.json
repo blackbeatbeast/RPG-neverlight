@@ -1,0 +1,236 @@
+{
+  "schemaVersion": 1,
+  "contentVersion": "0.3.0",
+  "rulesetVersion": "1.0.0",
+  "compatibility": {
+    "minimumRulesetVersion": "1.0.0",
+    "maximumRulesetVersion": "1.0.0"
+  },
+  "defaultLocale": "ja-JP",
+  "locales": {
+    "ja-JP": {
+      "content.asset.example.alt": "例示キャラクター画像の代替テキスト",
+      "content.char.example.name": "例示パスファインダー",
+      "content.char.example.role": "記録係",
+      "content.char.example.function": "来歴の確認",
+      "content.char.example.trait.precise": "几帳面",
+      "content.char.example.motif.none": "露骨な性的表現なし",
+      "content.zone.example.name": "例示区画",
+      "content.zone.example.summary": "検証用の小さな区画。",
+      "content.route.example.name": "例示ルート",
+      "content.route.example.description": "入口から出口までの決定的な検証ルート。",
+      "content.node.example.entry": "信号を確認する。",
+      "content.node.example.exit": "区画を出る。",
+      "content.enemy.example.name": "錆びた標本",
+      "content.command.enter.name": "進む",
+      "content.command.enter.description": "次の区画へ移動する。",
+      "content.item.example.name": "検証用の短剣",
+      "content.item.example.description": "小さく扱いやすい刃物。",
+      "content.affix.example.name": "反響する",
+      "content.card.example.name": "最初の記録",
+      "content.card.example.description": "最初の発見を記録するカード。",
+      "content.recipe.example.name": "短剣の整備",
+      "content.recipe.example.description": "素材を使って短剣を整備する。",
+      "content.codex.example.title": "例示記録",
+      "content.codex.example.body": "スキーマ検証のための記録。",
+      "content.drop.example.name": "例示ドロップ"
+    }
+  },
+  "assets": [
+    {
+      "id": "asset.char.example.general",
+      "kind": "character-portrait",
+      "path": "content/examples/not-committed/example-general.webp",
+      "altTextKey": "content.asset.example.alt",
+      "audience": "general",
+      "generalFallbackId": null,
+      "depictedCharacterId": "char.example",
+      "provenance": {
+        "creator": "Project Neverlight internal example",
+        "provider": "internal",
+        "license": "original example placeholder",
+        "createdAt": "2026-08-19",
+        "sourceInputs": ["original geometric placeholder"],
+        "rightsStatus": "original",
+        "reviewer": "content-pipeline-example",
+        "reviewedAt": "2026-08-19",
+        "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "contentReview": null
+    }
+  ],
+  "characters": [
+    {
+      "id": "char.example",
+      "nameKey": "content.char.example.name",
+      "age": 28,
+      "roleKey": "content.char.example.role",
+      "gameplayFunctionKey": "content.char.example.function",
+      "traitKeys": ["content.char.example.trait.precise"],
+      "prohibitedMotifKeys": ["content.char.example.motif.none"],
+      "generalAssetId": "asset.char.example.general",
+      "suggestiveAssetId": null
+    }
+  ],
+  "zones": [
+    {
+      "id": "zone.example",
+      "nameKey": "content.zone.example.name",
+      "summaryKey": "content.zone.example.summary",
+      "routeIds": ["route.example"]
+    }
+  ],
+  "routes": [
+    {
+      "id": "route.example",
+      "zoneId": "zone.example",
+      "nameKey": "content.route.example.name",
+      "descriptionKey": "content.route.example.description",
+      "entryNodeId": "node.example.entry",
+      "terminalNodeIds": ["node.example.exit"],
+      "nodeIds": ["node.example.entry", "node.example.exit"]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "node.example.entry",
+      "routeId": "route.example",
+      "type": "scene",
+      "textKey": "content.node.example.entry",
+      "nextNodeIds": ["node.example.exit"],
+      "commandIds": ["cmd.enter"],
+      "enemyIds": [],
+      "dropTableId": null
+    },
+    {
+      "id": "node.example.exit",
+      "routeId": "route.example",
+      "type": "exit",
+      "textKey": "content.node.example.exit",
+      "nextNodeIds": [],
+      "commandIds": [],
+      "enemyIds": [],
+      "dropTableId": null
+    }
+  ],
+  "enemies": [
+    {
+      "id": "enemy.example",
+      "nameKey": "content.enemy.example.name",
+      "behaviorTags": ["telegraph-heavy", "armor-ward"],
+      "baseStats": {
+        "vitality": 10,
+        "guard": 2
+      },
+      "dropTableId": "drop.example"
+    }
+  ],
+  "commands": [
+    {
+      "id": "cmd.enter",
+      "nameKey": "content.command.enter.name",
+      "descriptionKey": "content.command.enter.description",
+      "kind": "basic",
+      "target": "single-enemy",
+      "queueSlots": 1,
+      "powerCost": 0
+    }
+  ],
+  "items": [
+    {
+      "id": "item.weapon.example",
+      "nameKey": "content.item.example.name",
+      "descriptionKey": "content.item.example.description",
+      "slot": "weapon",
+      "rarity": "common",
+      "tags": ["blade", "example"],
+      "baseStats": {
+        "attack": 3
+      },
+      "affixBudget": {
+        "common": 0,
+        "uncommon": 1,
+        "rare": 2,
+        "unique": 3,
+        "relic": 4
+      },
+      "tradePolicy": "unbound-until-equipped"
+    }
+  ],
+  "affixes": [
+    {
+      "id": "affix.example.echoing",
+      "nameKey": "content.affix.example.name",
+      "allowedSlots": ["weapon"],
+      "tags": ["focus"],
+      "conflicts": [],
+      "maximumBudget": 2,
+      "tiers": [
+        {
+          "tier": 1,
+          "minValue": 1,
+          "maxValue": 2,
+          "budget": 1
+        }
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "card.example",
+      "nameKey": "content.card.example.name",
+      "descriptionKey": "content.card.example.description",
+      "characterId": "char.example",
+      "rarity": "uncommon",
+      "acquisition": ["codex-milestone"],
+      "duplicateInk": 2,
+      "effect": {
+        "type": "tag-threshold",
+        "tag": "example",
+        "modifier": "focus-cost-minus-one",
+        "cap": 1
+      },
+      "generalAssetId": "asset.char.example.general",
+      "suggestiveAssetId": null
+    }
+  ],
+  "recipes": [
+    {
+      "id": "recipe.example",
+      "nameKey": "content.recipe.example.name",
+      "descriptionKey": "content.recipe.example.description",
+      "inputs": [
+        {
+          "resourceId": "material.scrap",
+          "quantity": 1
+        }
+      ],
+      "outputItemId": "item.weapon.example",
+      "outputQuantity": 1
+    }
+  ],
+  "codex": [
+    {
+      "id": "codex.example",
+      "category": "world",
+      "titleKey": "content.codex.example.title",
+      "bodyKey": "content.codex.example.body",
+      "relatedIds": ["zone.example", "char.example"]
+    }
+  ],
+  "dropTables": [
+    {
+      "id": "drop.example",
+      "nameKey": "content.drop.example.name",
+      "entries": [
+        {
+          "itemId": "item.weapon.example",
+          "chance": 0.5,
+          "minQuantity": 1,
+          "maxQuantity": 1
+        }
+      ],
+      "noDropChance": 0.5
+    }
+  ]
+}

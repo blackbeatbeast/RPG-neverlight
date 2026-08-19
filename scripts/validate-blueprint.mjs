@@ -24,6 +24,7 @@ const required = [
   'docs/15_REQUIREMENTS_TRACEABILITY.md', 'docs/16_FREE_TIER_BUDGET.md',
   'docs/17_CODEX_COMMANDS_JA.md',
   'provenance/ASSET_PROVENANCE.md', 'provenance/RESEARCH_LOG.md',
+  'content/examples/bundle.json',
   'backlog/00_EPICS.md', 'PUBLISH_TO_GITHUB.md', 'PUBLISH_RPG_NEVERLIGHT.cmd'
 ];
 for (const file of required) ok(exists(file), `Missing required file: ${file}`);
@@ -54,13 +55,13 @@ for (const file of jsonFiles) {
   catch (error) { errors.push(`Invalid JSON ${path.relative(root, file)}: ${error.message}`); }
 }
 
-const characters = JSON.parse(read('content/examples/characters.json')).characters;
+const characters = JSON.parse(read('content/examples/bundle.json')).characters;
 for (const character of characters) {
   ok(Number.isInteger(character.age) && character.age >= 20, `${character.id} must have integer age >= 20.`);
-  ok(Boolean(character.generalAsset), `${character.id} needs a general asset.`);
-  if (character.suggestiveOptional) {
-    ok(Boolean(character.suggestiveAsset), `${character.id} marks suggestiveOptional but lacks suggestive asset.`);
-    ok(Boolean(character.generalAsset), `${character.id} suggestive variant lacks general fallback.`);
+  ok(Boolean(character.generalAssetId), `${character.id} needs a general asset.`);
+  if (character.suggestiveAssetId) {
+    ok(Boolean(character.suggestiveAssetId), `${character.id} has a suggestive asset reference without a general fallback.`);
+    ok(Boolean(character.generalAssetId), `${character.id} suggestive variant lacks general fallback.`);
   }
 }
 

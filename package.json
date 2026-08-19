@@ -18,6 +18,7 @@
     "test": "pnpm validate:blueprint && pnpm --filter @neverlight/* --recursive --if-present run test",
     "test:e2e": "playwright test --config=apps/web/playwright.config.ts",
     "validate:blueprint": "node scripts/validate-blueprint.mjs",
+    "content:validate": "pnpm --filter @neverlight/content-schema run build && node scripts/validate-content.mjs",
     "db:migrate:local": "pnpm --filter @neverlight/worker run db:migrate:local"
   },
   "devDependencies": {
