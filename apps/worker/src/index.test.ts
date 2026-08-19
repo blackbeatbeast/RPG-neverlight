@@ -798,7 +798,7 @@ describe('exploration-to-combat vertical slice', () => {
     };
 
     const routeStart = await app.request(
-      '/api/v1/routes/rain-tower/start',
+      '/api/v1/routes/glass-marsh/start',
       {
         method: 'POST',
         headers: { ...headers, 'Idempotency-Key': 'route-start-1' },

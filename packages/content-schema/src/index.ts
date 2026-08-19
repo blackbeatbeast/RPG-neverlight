@@ -260,6 +260,42 @@ export const codexSchema = z
   })
   .strict();
 
+const questStepSchema = z
+  .object({
+    id: stableIdSchema,
+    textKey: localizationKeySchema,
+    targetId: stableIdSchema,
+    targetType: z.enum(['discover', 'defeat', 'equip', 'salvage', 'codex']),
+    count: positiveInteger.max(1000),
+  })
+  .strict();
+
+export const questSchema = z
+  .object({
+    id: stableIdSchema,
+    nameKey: localizationKeySchema,
+    descriptionKey: localizationKeySchema,
+    zoneId: stableIdSchema,
+    routeId: stableIdSchema,
+    steps: z.array(questStepSchema).min(1),
+    rewardItemIds: idListAllowEmptySchema,
+    codexId: stableIdSchema.nullable(),
+  })
+  .strict();
+
+export const dispatchSchema = z
+  .object({
+    id: stableIdSchema,
+    nameKey: localizationKeySchema,
+    descriptionKey: localizationKeySchema,
+    routeId: stableIdSchema,
+    durationMinutes: positiveInteger.max(60),
+    risk: z.enum(['low', 'medium', 'high']),
+    rewardDropTableId: stableIdSchema,
+    codexId: stableIdSchema.nullable(),
+  })
+  .strict();
+
 const dropEntrySchema = z
   .object({
     itemId: stableIdSchema,
@@ -303,6 +339,8 @@ export const contentBundleSchema = z
     cards: z.array(cardSchema),
     recipes: z.array(recipeSchema),
     codex: z.array(codexSchema),
+    quests: z.array(questSchema),
+    dispatches: z.array(dispatchSchema),
     dropTables: z.array(dropTableSchema),
   })
   .strict();
@@ -319,6 +357,8 @@ export type Affix = z.infer<typeof affixSchema>;
 export type Card = z.infer<typeof cardSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;
 export type CodexEntry = z.infer<typeof codexSchema>;
+export type Quest = z.infer<typeof questSchema>;
+export type Dispatch = z.infer<typeof dispatchSchema>;
 export type DropTable = z.infer<typeof dropTableSchema>;
 export type ContentBundle = z.infer<typeof contentBundleSchema>;
 
@@ -448,6 +488,8 @@ export function validateContentBundle(input: unknown): ContentValidationReport {
     ['cards', bundle.cards],
     ['recipes', bundle.recipes],
     ['codex', bundle.codex],
+    ['quests', bundle.quests],
+    ['dispatches', bundle.dispatches],
     ['dropTables', bundle.dropTables],
   ];
   for (const [collection, entries] of collections)
@@ -743,6 +785,33 @@ export function validateContentBundle(input: unknown): ContentValidationReport {
         'codex related definition',
       ),
     );
+  });
+  bundle.quests.forEach((quest, index) => {
+    const path = pathFor('quests', index);
+    requireLocalization(quest.nameKey, `${path}.nameKey`);
+    requireLocalization(quest.descriptionKey, `${path}.descriptionKey`);
+    requireReference(quest.zoneId, `${path}.zoneId`, 'quest zone');
+    requireReference(quest.routeId, `${path}.routeId`, 'quest route');
+    if (quest.codexId) requireReference(quest.codexId, `${path}.codexId`, 'quest codex');
+    quest.rewardItemIds.forEach((itemId, itemIndex) =>
+      requireReference(itemId, `${path}.rewardItemIds[${itemIndex}]`, 'quest reward item'),
+    );
+    quest.steps.forEach((step, stepIndex) => {
+      requireLocalization(step.textKey, `${path}.steps[${stepIndex}].textKey`);
+      requireReference(step.targetId, `${path}.steps[${stepIndex}].targetId`, 'quest target');
+    });
+  });
+  bundle.dispatches.forEach((dispatch, index) => {
+    const path = pathFor('dispatches', index);
+    requireLocalization(dispatch.nameKey, `${path}.nameKey`);
+    requireLocalization(dispatch.descriptionKey, `${path}.descriptionKey`);
+    requireReference(dispatch.routeId, `${path}.routeId`, 'dispatch route');
+    requireReference(
+      dispatch.rewardDropTableId,
+      `${path}.rewardDropTableId`,
+      'dispatch reward drop table',
+    );
+    if (dispatch.codexId) requireReference(dispatch.codexId, `${path}.codexId`, 'dispatch codex');
   });
   bundle.dropTables.forEach((table, index) => {
     const path = pathFor('dropTables', index);

@@ -47,7 +47,8 @@ packages/game-core/            # deterministic pure game rules
 packages/content-schema/       # schemas and content validation
 packages/db/                   # D1 migrations and repositories
 packages/ui/                   # shared semantic retro/modern UI
-content/examples/              # non-production example content
+content/first-region/           # versioned internal-alpha region bundle and review packet
+content/examples/               # small schema regression fixture
 config/                        # hard product constraints and flags
 docs/                          # source of truth
 backlog/                       # issue-ready task packets
@@ -172,13 +173,17 @@ pnpm combat:replay fixtures/combat/*.json
 pnpm combat:simulate -- --runs 10000
 pnpm economy:simulate -- --runs 100000
 pnpm ledger:reconcile -- --fixture all
+pnpm content:similarity-review
+pnpm economy:simulate -- --bundle first-region
 pnpm test:e2e -- --grep vertical-slice
 pnpm test:e2e -- --grep inventory
 ```
 
 The same commands work in Windows PowerShell. `pnpm test` also runs the blueprint check, the fixed
-seed `game-core` test, the valid/invalid content fixture test, and the Worker health test. The combat
-commands replay the versioned golden fixtures and run a fixed-seed 10,000-run report; filesystem
+seed `game-core` test, the valid/invalid content fixture test, and the Worker health test. The content
+validator targets the versioned first-region bundle; the small example bundle remains covered by the
+content-schema unit tests. The combat commands replay the versioned golden fixtures and run a fixed-seed
+10,000-run report; filesystem
 access is confined to these CLI scripts, not the pure `packages/game-core` rules.
 
 The Issue #2 semantic shell also has browser checks for the 360 px touch layout and the 1280 px

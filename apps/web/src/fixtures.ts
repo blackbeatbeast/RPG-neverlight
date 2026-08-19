@@ -32,8 +32,8 @@ export const UI_FIXTURES = {
   codexEntries: [
     {
       detail: localized(
-        '雨鐘街の地下に残る、断続的な信号の写し。',
-        'A copy of an intermittent signal beneath Rainbell Square.',
+        '雨鐘街の外縁に残る、三つの灯の信号写し。',
+        'A copy of the three-light signal at Rainbell Quay.',
       ),
       name: localized('雨鐘信号 / 01', 'Rainbell signal / 01'),
     },
@@ -56,8 +56,8 @@ export const UI_FIXTURES = {
     },
     {
       detail: localized(
-        '信号の獣は動きを止め、次の一手を準備している。',
-        'The Signal Beast pauses and prepares its next move.',
+        '硝子沼の鐘守は動きを止め、三つの灯で次の一手を示している。',
+        'The Glass Marsh Bellkeeper pauses and marks its next move with three lights.',
       ),
       label: localized('02 / 予兆', '02 / Telegraph'),
       tone: 'danger' as const,
@@ -95,10 +95,10 @@ export const UI_FIXTURES = {
       '壊れた信号機の内側で、まだ温度を持っていた。',
       'It still held warmth inside a broken signal box.',
     ),
-    name: localized('残響する部品', 'Echoing component'),
+    name: localized('鐘守の余音刃', 'Bellkeeper Aftertone Blade'),
     provenance: localized(
-      '雨の送電塔 / fixture encounter / 2026-08-20',
-      'Rain Tower / fixture encounter / 2026-08-20',
+      '硝子沼の水路 / first-region encounter / 2026-08-20',
+      'Glass Marsh Waterway / first-region encounter / 2026-08-20',
     ),
   },
   routes: [
@@ -107,7 +107,7 @@ export const UI_FIXTURES = {
         '短い遭遇と、読み取りやすい予兆がある。',
         'A short encounter with readable telegraphs.',
       ),
-      name: localized('雨の送電塔', 'Rain Tower'),
+      name: localized('硝子沼の水路', 'Glass Marsh Waterway'),
       risk: localized('低', 'Low'),
       time: localized('約1分', 'About 1 min'),
     },
@@ -116,7 +116,7 @@ export const UI_FIXTURES = {
         '信号が重なる。結果ログを読む余裕を残す。',
         'Signals overlap; leave room to read the result log.',
       ),
-      name: localized('地下の余白', 'Underground margin'),
+      name: localized('鐘守設備の測量', 'Bellkeeper survey'),
       risk: localized('中', 'Medium'),
       time: localized('約5分', 'About 5 min'),
     },
@@ -160,12 +160,12 @@ export const UI_FIXTURES = {
     },
     town: {
       alt: localized(
-        '雨鐘街の広場を表す灯りと枠線の抽象画。',
-        'An abstract scene of lights and borders for Rainbell Square.',
+        '雨鐘街の外縁を表す三つの灯りと枠線の抽象画。',
+        'An abstract scene of three lights and borders for Rainbell Quay.',
       ),
       caption: localized(
-        '雨鐘街 / 次の操作を番号で選ぶ',
-        'Rainbell Square / choose the next action by number',
+        '雨鐘街・外縁 / 次の操作を番号で選ぶ',
+        'Rainbell Quay / choose the next action by number',
       ),
       id: 'town',
       motif: 'town',
@@ -173,8 +173,8 @@ export const UI_FIXTURES = {
   } satisfies Record<string, SceneFixture>,
   townNotices: [
     localized(
-      '本日のDispatchは1件。読み取り専用のfixtureです。',
-      'One dispatch today. This is a read-only fixture.',
+      '本日のdispatchは1件。硝子沼の短い調査便です。',
+      'One dispatch today. It is a short Glass Marsh survey.',
     ),
     localized(
       '接続: local / 画像: 任意 / 音声: なし',

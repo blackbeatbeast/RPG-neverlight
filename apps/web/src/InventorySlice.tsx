@@ -187,7 +187,7 @@ export function InventorySliceApp() {
     }
   }
 
-  async function claim(sourceRef: 'rain-tower.boss' | 'rain-tower.cache'): Promise<void> {
+  async function claim(sourceRef: 'glass-marsh.boss' | 'glass-marsh.cache'): Promise<void> {
     setBusy(true);
     setMessage('');
     try {
@@ -436,21 +436,21 @@ export function InventorySliceApp() {
                       className="command-button"
                       disabled={busy}
                       type="button"
-                      onClick={() => void claim('rain-tower.boss')}
+                      onClick={() => void claim('glass-marsh.boss')}
                     >
                       <span aria-hidden="true" className="command-key">
                         1
                       </span>
                       <span className="command-copy">
                         <strong>Rare以上をmint</strong>
-                        <span>server source: tower boss</span>
+                        <span>server source: Glass Marsh boss</span>
                       </span>
                     </button>
                     <button
                       className="command-button"
                       disabled={busy}
                       type="button"
-                      onClick={() => void claim('rain-tower.cache')}
+                      onClick={() => void claim('glass-marsh.cache')}
                     >
                       <span aria-hidden="true" className="command-key">
                         2

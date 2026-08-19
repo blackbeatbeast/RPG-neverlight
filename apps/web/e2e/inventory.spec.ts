@@ -22,7 +22,7 @@ test.describe('Issue #7 inventory and loot', () => {
           .slice(1)
           .join('=') ?? '';
       const response = await fetch('/api/v1/inventory/loot/claim', {
-        body: JSON.stringify({ seed: 1, sourceRef: 'rain-tower.cache' }),
+        body: JSON.stringify({ seed: 1, sourceRef: 'glass-marsh.cache' }),
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
@@ -47,7 +47,7 @@ test.describe('Issue #7 inventory and loot', () => {
           .join('=') ?? '';
       const post = async () => {
         const response = await fetch('/api/v1/inventory/loot/claim', {
-          body: JSON.stringify({ sourceRef: 'rain-tower.cache' }),
+          body: JSON.stringify({ sourceRef: 'glass-marsh.cache' }),
           credentials: 'include',
           headers: {
             'Content-Type': 'application/json',

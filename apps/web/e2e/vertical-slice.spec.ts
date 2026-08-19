@@ -10,16 +10,16 @@ test.describe('Issue #6 vertical-slice', () => {
     await expect(page.locator('#page-title')).toHaveText('実APIの縦切り');
 
     await page.getByRole('button', { name: /実APIルートを開始/ }).click();
-    await expect(page.locator('#page-title')).toHaveText('雨の送電塔');
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の水路');
     await expect(page.getByText(/Seed hash/)).toBeVisible();
 
     await page.getByRole('button', { name: /遭遇を選ぶ/ }).click();
-    await expect(page.locator('#page-title')).toHaveText('信号の獣');
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の鐘守');
     await expect(page.getByText(/heavy-telegraph/)).toBeVisible();
 
     // A refresh is a GET resume, not a second route mutation.
     await page.reload();
-    await expect(page.locator('#page-title')).toHaveText('信号の獣');
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の鐘守');
     await page.getByRole('button', { name: /^攻撃/ }).click();
     await page.getByRole('button', { name: /^攻撃/ }).click();
     await page.getByRole('button', { name: /^攻撃/ }).click();
@@ -44,7 +44,7 @@ test.describe('Issue #6 vertical-slice', () => {
   test('rejects forged seed/result fields and returns read-only guidance', async ({ page }) => {
     await page.goto('/?vertical=1');
     await page.getByRole('button', { name: /実APIルートを開始/ }).click();
-    await expect(page.locator('#page-title')).toHaveText('雨の送電塔');
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の水路');
 
     const forged = await page.evaluate(async () => {
       const csrf =
@@ -84,7 +84,7 @@ test.describe('Issue #6 vertical-slice', () => {
   test('fault-injection retry/back/refresh transcript', async ({ page }) => {
     await page.goto('/?vertical=1');
     await page.getByRole('button', { name: /実APIルートを開始/ }).click();
-    await expect(page.locator('#page-title')).toHaveText('雨の送電塔');
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の水路');
 
     const mutate = async (path: string, body: Record<string, unknown>, key: string) =>
       page.evaluate(
@@ -128,9 +128,9 @@ test.describe('Issue #6 vertical-slice', () => {
     expect((chosenRetry.body as RoutePayload).replayed).toBe(true);
 
     await page.goto('/?vertical=1&resume=1');
-    await expect(page.locator('#page-title')).toHaveText('信号の獣');
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の鐘守');
     await page.goBack();
-    await expect(page.locator('#page-title')).toHaveText('信号の獣');
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の鐘守');
 
     const targetId = chosenBody.route.encounter?.combatState.enemies[0]?.id;
     expect(targetId).toBeTruthy();
