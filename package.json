@@ -1,14 +1,33 @@
 {
-  "name": "rpg-neverlight-blueprint",
+  "name": "project-neverlight",
   "private": true,
-  "version": "0.0.0",
-  "description": "Design-controlled blueprint for a clean-room static-image browser RPG",
+  "version": "0.1.0",
+  "description": "Reproducible TypeScript monorepo foundation for Project Neverlight",
+  "packageManager": "pnpm@9.15.4",
   "engines": {
-    "node": ">=22.0.0"
+    "node": "22.13.0",
+    "pnpm": "9.15.4"
   },
   "scripts": {
+    "dev": "pnpm --parallel --filter @neverlight/web --filter @neverlight/worker run dev",
+    "build": "pnpm --filter @neverlight/* --recursive --if-present run build",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write \"package.json\" \"pnpm-workspace.yaml\" \"tsconfig*.json\" \"*.{mjs,json,jsonc}\" \"apps/**/*.{ts,tsx,css,html,json,jsonc}\" \"packages/**/*.{ts,tsx,json}\" \"packages/db/migrations/README.md\" \".github/workflows/*.yml\"",
+    "format:check": "prettier --check \"package.json\" \"pnpm-workspace.yaml\" \"tsconfig*.json\" \"*.{mjs,json,jsonc}\" \"apps/**/*.{ts,tsx,css,html,json,jsonc}\" \"packages/**/*.{ts,tsx,json}\" \"packages/db/migrations/README.md\" \".github/workflows/*.yml\"",
+    "typecheck": "pnpm --filter @neverlight/* --recursive --if-present run typecheck",
+    "test": "pnpm validate:blueprint && pnpm --filter @neverlight/* --recursive --if-present run test",
     "validate:blueprint": "node scripts/validate-blueprint.mjs",
-    "test": "node scripts/validate-blueprint.mjs",
-    "format:check": "node scripts/validate-blueprint.mjs"
+    "db:migrate:local": "pnpm --filter @neverlight/worker run db:migrate:local"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.2.0",
+    "eslint": "10.8.1",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.11.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.11"
   }
 }
