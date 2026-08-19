@@ -15,12 +15,20 @@ export default defineConfig({
     screenshot: 'off',
     trace: 'retain-on-failure',
   },
-  webServer: {
-    command: 'pnpm --filter @neverlight/web run dev',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    url: 'http://127.0.0.1:5173',
-  },
+  webServer: [
+    {
+      command: 'pnpm --filter @neverlight/worker run dev',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      url: 'http://127.0.0.1:8787/api/health',
+    },
+    {
+      command: 'pnpm --filter @neverlight/web run dev',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      url: 'http://127.0.0.1:5173',
+    },
+  ],
   projects: [
     {
       name: 'mobile',
