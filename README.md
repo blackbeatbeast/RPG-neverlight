@@ -135,8 +135,9 @@ The expected local response is a JSON object with `ok: true`, service
 
 ### Local D1 migration
 
-The migration lives in `packages/db/migrations` and is wired into the Worker through a local-only
-Wrangler configuration. Apply it with either shell:
+The migrations live in `packages/db/migrations` and are wired into the Worker through a local-only
+Wrangler configuration. `pnpm db:migrate:local` applies the bootstrap marker and the guest/player
+identity schema to local D1:
 
 ```bash
 pnpm db:migrate:local
@@ -146,9 +147,12 @@ pnpm db:migrate:local
 pnpm db:migrate:local
 ```
 
-This writes only to Wrangler's local `.wrangler/state` directory. It creates a bootstrap marker and
-does not create player, identity, item, card, currency, social, or content tables. To reset local
-state, stop development tools and remove `.wrangler/state` from the Worker directory.
+This writes only to Wrangler's local `.wrangler/state` directory. Issue #4 creates only guest
+identity, player aggregate, preferences, feature-flag, inventory-location, idempotency, and rate-limit
+scaffolding; it does not create item, card, currency, combat, trade, or social value. To reset local
+state, stop development tools and remove `.wrangler/state` from the Worker directory. To delete one
+guest's data through the API, send `POST /api/v1/guest/reset` with the current CSRF token and an
+`Idempotency-Key`; the Worker deletes the guest account and clears both cookies.
 
 ### Verification commands
 
@@ -178,7 +182,8 @@ pnpm test:e2e -- --project=desktop
 The browser checks cover the canonical screen flow, numbered keyboard commands, touch buttons,
 input-field shortcut suppression, Retro/Modern command parity, empty/error/maintenance states,
 images-disabled rendering, reduced motion, and 200% zoom reflow. CI installs the same pinned
-Chromium browser with system dependencies and uploads the Playwright evidence as an artifact.
+Chromium browser using the runner's existing system libraries and uploads the Playwright evidence
+as an artifact.
 
 ## Launch stance
 
