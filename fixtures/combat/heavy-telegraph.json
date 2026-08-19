@@ -1,0 +1,78 @@
+{
+  "fixtureVersion": 1,
+  "name": "heavy telegraph is readable and guardable",
+  "input": {
+    "commands": [{ "type": "guard" }, { "type": "strike", "targetId": "enemy.heavy-telegraph.1" }],
+    "rulesetVersion": "1.0.0",
+    "seed": 42,
+    "state": {
+      "cooldowns": { "piercing-lunge": 0, "ward-break": 0 },
+      "enemies": [
+        {
+          "armor": 1,
+          "focus": 0,
+          "guard": 0,
+          "id": "enemy.heavy-telegraph.1",
+          "kind": "enemy",
+          "maxFocus": 0,
+          "maxVitality": 32,
+          "name": "heavy-telegraph",
+          "pattern": "heavy-telegraph",
+          "power": 11,
+          "speed": 5,
+          "statuses": [],
+          "vitality": 32,
+          "ward": 0
+        }
+      ],
+      "outcome": "ongoing",
+      "player": {
+        "armor": 2,
+        "focus": 6,
+        "guard": 0,
+        "id": "player",
+        "inventory": { "field-draught": 1 },
+        "kind": "player",
+        "maxFocus": 6,
+        "maxVitality": 40,
+        "name": "Pathfinder",
+        "power": 6,
+        "speed": 8,
+        "stance": "balanced",
+        "statuses": [],
+        "vitality": 40,
+        "ward": 1
+      },
+      "telegraphs": [],
+      "turn": 1
+    }
+  },
+  "expected": {
+    "eventTypes": [
+      "resolution_started",
+      "turn_started",
+      "telegraph",
+      "command_accepted",
+      "command_executed",
+      "guard_changed",
+      "enemy_action",
+      "damage",
+      "status_applied",
+      "turn_ended",
+      "turn_started",
+      "damage",
+      "status_tick",
+      "telegraph",
+      "command_accepted",
+      "command_executed",
+      "damage",
+      "enemy_action",
+      "damage",
+      "status_applied",
+      "turn_ended"
+    ],
+    "outcome": "ongoing",
+    "outputStateHash": "fnv1a32:2db1a05e",
+    "resolutionHash": "fnv1a32:82822a57"
+  }
+}

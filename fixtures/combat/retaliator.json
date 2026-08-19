@@ -1,0 +1,87 @@
+{
+  "fixtureVersion": 1,
+  "name": "retaliator changes the correct command",
+  "input": {
+    "commands": [
+      { "type": "shift", "stance": "defensive" },
+      { "type": "guard" },
+      { "type": "strike", "targetId": "enemy.retaliator.1" }
+    ],
+    "rulesetVersion": "1.0.0",
+    "seed": 99,
+    "state": {
+      "cooldowns": { "piercing-lunge": 0, "ward-break": 0 },
+      "enemies": [
+        {
+          "armor": 1,
+          "focus": 0,
+          "guard": 0,
+          "id": "enemy.retaliator.1",
+          "kind": "enemy",
+          "maxFocus": 0,
+          "maxVitality": 28,
+          "name": "retaliator",
+          "pattern": "retaliator",
+          "power": 8,
+          "speed": 8,
+          "statuses": [],
+          "vitality": 28,
+          "ward": 1
+        }
+      ],
+      "outcome": "ongoing",
+      "player": {
+        "armor": 2,
+        "focus": 6,
+        "guard": 0,
+        "id": "player",
+        "inventory": { "field-draught": 1 },
+        "kind": "player",
+        "maxFocus": 6,
+        "maxVitality": 40,
+        "name": "Pathfinder",
+        "power": 6,
+        "speed": 8,
+        "stance": "balanced",
+        "statuses": [],
+        "vitality": 40,
+        "ward": 1
+      },
+      "telegraphs": [],
+      "turn": 1
+    }
+  },
+  "expected": {
+    "eventTypes": [
+      "resolution_started",
+      "turn_started",
+      "telegraph",
+      "command_accepted",
+      "command_executed",
+      "command_accepted",
+      "enemy_action",
+      "damage",
+      "turn_ended",
+      "turn_started",
+      "telegraph",
+      "command_accepted",
+      "command_executed",
+      "guard_changed",
+      "enemy_action",
+      "damage",
+      "turn_ended",
+      "turn_started",
+      "telegraph",
+      "enemy_action",
+      "damage",
+      "status_applied",
+      "command_accepted",
+      "command_executed",
+      "damage",
+      "turn_ended"
+    ],
+    "outcome": "ongoing",
+    "outputStateHash": "fnv1a32:8b710574",
+    "resolutionHash": "fnv1a32:b9c1c5e8"
+  }
+}

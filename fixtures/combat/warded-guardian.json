@@ -1,0 +1,82 @@
+{
+  "fixtureVersion": 1,
+  "name": "warded guardian rewards piercing control",
+  "input": {
+    "commands": [
+      { "type": "skill", "skillId": "ward-break", "targetId": "enemy.warded-guardian.1" },
+      { "type": "guard" }
+    ],
+    "rulesetVersion": "1.0.0",
+    "seed": 7,
+    "state": {
+      "cooldowns": { "piercing-lunge": 0, "ward-break": 0 },
+      "enemies": [
+        {
+          "armor": 2,
+          "focus": 0,
+          "guard": 2,
+          "id": "enemy.warded-guardian.1",
+          "kind": "enemy",
+          "maxFocus": 0,
+          "maxVitality": 30,
+          "name": "warded-guardian",
+          "pattern": "warded-guardian",
+          "power": 7,
+          "speed": 6,
+          "statuses": [],
+          "vitality": 30,
+          "ward": 8
+        }
+      ],
+      "outcome": "ongoing",
+      "player": {
+        "armor": 2,
+        "focus": 6,
+        "guard": 0,
+        "id": "player",
+        "inventory": { "field-draught": 1 },
+        "kind": "player",
+        "maxFocus": 6,
+        "maxVitality": 40,
+        "name": "Pathfinder",
+        "power": 6,
+        "speed": 8,
+        "stance": "balanced",
+        "statuses": [],
+        "vitality": 40,
+        "ward": 1
+      },
+      "telegraphs": [],
+      "turn": 1
+    }
+  },
+  "expected": {
+    "eventTypes": [
+      "resolution_started",
+      "turn_started",
+      "telegraph",
+      "command_accepted",
+      "command_executed",
+      "focus_changed",
+      "cooldown_changed",
+      "damage",
+      "status_applied",
+      "status_applied",
+      "enemy_action",
+      "damage",
+      "status_applied",
+      "turn_ended",
+      "turn_started",
+      "telegraph",
+      "command_accepted",
+      "command_executed",
+      "guard_changed",
+      "focus_changed",
+      "enemy_action",
+      "turn_ended"
+    ],
+    "outcome": "ongoing",
+    "outputStateHash": "fnv1a32:1d63185e",
+    "resolutionHash": "fnv1a32:c01733f0"
+  }
+}

@@ -165,10 +165,14 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm format:check
+pnpm combat:replay fixtures/combat/*.json
+pnpm combat:simulate -- --runs 10000
 ```
 
 The same commands work in Windows PowerShell. `pnpm test` also runs the blueprint check, the fixed
-seed `game-core` test, the valid/invalid content fixture test, and the Worker health test.
+seed `game-core` test, the valid/invalid content fixture test, and the Worker health test. The combat
+commands replay the versioned golden fixtures and run a fixed-seed 10,000-run report; filesystem
+access is confined to these CLI scripts, not the pure `packages/game-core` rules.
 
 The Issue #2 semantic shell also has browser checks for the 360 px touch layout and the 1280 px
 desktop layout. Install the local Chromium browser once, then run both projects:
