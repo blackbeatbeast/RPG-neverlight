@@ -19,6 +19,8 @@
     "test:e2e": "playwright test --config=apps/web/playwright.config.ts",
     "combat:replay": "pnpm --filter @neverlight/game-core run build && node scripts/combat-replay.mjs",
     "combat:simulate": "pnpm --filter @neverlight/game-core run build && node scripts/combat-simulate.mjs",
+    "economy:simulate": "pnpm --filter @neverlight/game-core run build && node scripts/economy-simulate.mjs",
+    "ledger:reconcile": "node scripts/ledger-reconcile.mjs",
     "validate:blueprint": "node scripts/validate-blueprint.mjs",
     "content:validate": "pnpm --filter @neverlight/content-schema run build && node scripts/validate-content.mjs",
     "db:migrate:local": "pnpm --filter @neverlight/worker run db:migrate:local"

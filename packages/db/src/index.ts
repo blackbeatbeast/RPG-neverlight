@@ -1,5 +1,12 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import {
+  calculateSalvage,
+  type LootItemInstance,
+  type LootItemSlot,
+  type LootRarity,
+} from '@neverlight/game-core';
+
 export interface D1RepositoryBoundary {
   readonly db: D1Database;
 }
@@ -32,6 +39,21 @@ export interface InventoryLocation {
   id: string;
   kind: 'inventory' | 'vault' | 'equipment';
   sortOrder: number;
+}
+
+export interface CodexProgressView {
+  discoveryCount: number;
+  entryId: string;
+  entryType: 'item' | 'affix' | 'unique' | 'enemy' | 'location';
+  firstSeenAt: string;
+}
+
+export interface InventoryView {
+  capacity: number;
+  codex: CodexProgressView[];
+  items: LootItemInstance[];
+  materials: Record<string, number>;
+  playerVersion: number;
 }
 
 export interface PlayerView {
@@ -180,6 +202,45 @@ export interface ExplorationDataRepository {
   exitRoute(input: ExplorationMutationInput): Promise<StoredExplorationMutationResult>;
 }
 
+export interface InventoryMutationInput {
+  accountId: string;
+  action: string;
+  confirm?: boolean;
+  contentVersion?: string;
+  expectedVersion?: number;
+  expiresAt: string;
+  favorite?: boolean;
+  idempotencyKey: string;
+  inputHash: string;
+  item?: LootItemInstance;
+  itemId?: string;
+  itemIds?: readonly string[];
+  ledgerEventIds?: readonly string[];
+  locked?: boolean;
+  mintSeed?: number;
+  mode?: 'equip' | 'unequip';
+  now: string;
+  playerId: string;
+  rulesetVersion?: string;
+  sourceRef?: string;
+  transactionId?: string;
+  unlock?: boolean;
+}
+
+export interface StoredInventoryMutationResult {
+  inventory: InventoryView;
+  ledgerEventIds: string[];
+  replayed: boolean;
+}
+
+export interface InventoryDataRepository {
+  claimLoot(input: InventoryMutationInput): Promise<StoredInventoryMutationResult>;
+  equipItem(input: InventoryMutationInput): Promise<StoredInventoryMutationResult>;
+  getInventory(playerId: string): Promise<InventoryView | null>;
+  markItem(input: InventoryMutationInput): Promise<StoredInventoryMutationResult>;
+  salvageItems(input: InventoryMutationInput): Promise<StoredInventoryMutationResult>;
+}
+
 export class GuestRepositoryError extends Error {
   constructor(
     public readonly code:
@@ -192,7 +253,14 @@ export class GuestRepositoryError extends Error {
       | 'ROUTE_EXPIRED'
       | 'INVALID_ROUTE'
       | 'ENCOUNTER_NOT_FOUND'
-      | 'INVALID_COMBAT_STATE',
+      | 'INVALID_COMBAT_STATE'
+      | 'INVENTORY_FULL'
+      | 'ITEM_NOT_FOUND'
+      | 'ITEM_EQUIPPED'
+      | 'ITEM_PROTECTED'
+      | 'CONFIRMATION_REQUIRED'
+      | 'INVALID_INVENTORY_REQUEST'
+      | 'INVENTORY_STATE_CONFLICT',
     message: string,
   ) {
     super(message);
@@ -287,6 +355,54 @@ interface ExplorationIdempotencyRow {
   expires_at: string;
 }
 
+interface ItemRow {
+  account_id: string;
+  affixes_json: string;
+  base_id: string;
+  base_stats_json: string;
+  bind_state: LootItemInstance['bindState'];
+  content_version: string;
+  created_at: string;
+  equipment_slot: LootItemSlot | null;
+  favorite: number;
+  item_id: string;
+  item_level: number;
+  location: LootItemInstance['location'];
+  locked: number;
+  player_id: string;
+  provenance_json: string;
+  quality: number;
+  rarity: LootRarity;
+  ruleset_version: string;
+  slot: LootItemSlot;
+  source_ref: string;
+  status: LootItemInstance['status'];
+  unique_rule: string | null;
+}
+
+interface MaterialRow {
+  material_key: string;
+  quantity: number;
+}
+
+interface CodexProgressRow {
+  discovery_count: number;
+  entry_id: string;
+  entry_type: CodexProgressView['entryType'];
+  first_seen_at: string;
+}
+
+interface InventoryIdempotencyRow {
+  input_hash: string;
+  response_json: string;
+  expires_at: string;
+}
+
+interface StoredInventoryResponse {
+  inventory: InventoryView;
+  ledgerEventIds: string[];
+}
+
 const PENDING_RESPONSE = '__pending__';
 const DEFAULT_PREFERENCES: PlayerPreferences = {
   locale: 'ja-JP',
@@ -364,6 +480,114 @@ function preferenceRowFromView(view: PlayerView): PreferencesRow {
   };
 }
 
+function parseInventoryJson<T>(value: string, label: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', `${label}を読み取れません。`);
+  }
+}
+
+function normalizeInventoryMutationError(error: unknown): unknown {
+  if (error instanceof Error && error.message.toLowerCase().includes('malformed json')) {
+    return new GuestRepositoryError(
+      'INVENTORY_STATE_CONFLICT',
+      '持ち物の状態が競合しました。最新状態を取得してください。',
+    );
+  }
+  return error;
+}
+
+function inventoryItemFromRow(row: ItemRow): LootItemInstance {
+  return {
+    affixes: parseInventoryJson<LootItemInstance['affixes']>(row.affixes_json, 'affix'),
+    baseId: row.base_id,
+    baseStats: parseInventoryJson<LootItemInstance['baseStats']>(row.base_stats_json, 'base stat'),
+    bindState: row.bind_state,
+    equipmentSlot: row.equipment_slot,
+    favorite: booleanFromSql(row.favorite),
+    id: row.item_id,
+    itemLevel: row.item_level,
+    location: row.location,
+    locked: booleanFromSql(row.locked),
+    provenance: parseInventoryJson<LootItemInstance['provenance']>(
+      row.provenance_json,
+      'provenance',
+    ),
+    quality: row.quality,
+    rarity: row.rarity,
+    slot: row.slot,
+    status: row.status,
+    uniqueRule: row.unique_rule,
+  };
+}
+
+function inventoryViewFromRows(
+  playerVersion: number,
+  itemRows: ItemRow[],
+  materialRows: MaterialRow[],
+  codexRows: CodexProgressRow[],
+): InventoryView {
+  return {
+    capacity: 30,
+    codex: codexRows.map((row) => ({
+      discoveryCount: row.discovery_count,
+      entryId: row.entry_id,
+      entryType: row.entry_type,
+      firstSeenAt: row.first_seen_at,
+    })),
+    items: itemRows.map(inventoryItemFromRow),
+    materials: Object.fromEntries(materialRows.map((row) => [row.material_key, row.quantity])),
+    playerVersion,
+  };
+}
+
+function storedInventoryResponse(value: StoredInventoryResponse): string {
+  return JSON.stringify(value);
+}
+
+function codexEntriesForItem(
+  item: LootItemInstance,
+): Array<{ entryId: string; entryType: CodexProgressView['entryType'] }> {
+  const entries: Array<{ entryId: string; entryType: CodexProgressView['entryType'] }> = [
+    { entryId: item.baseId, entryType: 'item' as const },
+    ...item.affixes.map((affix) => ({ entryId: affix.id, entryType: 'affix' as const })),
+  ];
+  if (item.uniqueRule) entries.push({ entryId: item.uniqueRule, entryType: 'unique' });
+  return entries.filter(
+    (entry, index) =>
+      entries.findIndex(
+        (candidate) =>
+          candidate.entryType === entry.entryType && candidate.entryId === entry.entryId,
+      ) === index,
+  );
+}
+
+function addCodexEntries(
+  current: readonly CodexProgressView[],
+  item: LootItemInstance,
+  now: string,
+): CodexProgressView[] {
+  const next = current.map((entry) => ({ ...entry }));
+  for (const candidate of codexEntriesForItem(item)) {
+    const existing = next.find(
+      (entry) => entry.entryType === candidate.entryType && entry.entryId === candidate.entryId,
+    );
+    if (existing) existing.discoveryCount += 1;
+    else {
+      next.push({
+        discoveryCount: 1,
+        entryId: candidate.entryId,
+        entryType: candidate.entryType,
+        firstSeenAt: now,
+      });
+    }
+  }
+  return next.sort((left, right) =>
+    `${left.entryType}:${left.entryId}`.localeCompare(`${right.entryType}:${right.entryId}`),
+  );
+}
+
 function parseStoredJson(value: string, code: 'INVALID_COMBAT_STATE' | 'ROUTE_NOT_FOUND'): unknown {
   try {
     return JSON.parse(value) as unknown;
@@ -408,7 +632,9 @@ function explorationViewForStorage(view: ExplorationRunView): string {
   return JSON.stringify({ ...view, serverSeed: null, serverSeedHash: null });
 }
 
-export class D1GuestDataRepository implements GuestDataRepository, ExplorationDataRepository {
+export class D1GuestDataRepository
+  implements GuestDataRepository, ExplorationDataRepository, InventoryDataRepository
+{
   constructor(private readonly db: D1Database) {}
 
   async authenticateSession(tokenHash: string, now: string): Promise<AuthenticatedSession | null> {
@@ -546,6 +772,44 @@ export class D1GuestDataRepository implements GuestDataRepository, ExplorationDa
     return playerViewFromRows(player, preferences, locations, flags);
   }
 
+  async getInventory(playerId: string): Promise<InventoryView | null> {
+    const player = await this.db
+      .prepare('SELECT version FROM players WHERE player_id = ?')
+      .bind(playerId)
+      .first<{ version: number }>();
+    if (!player) return null;
+
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          `SELECT item_id, account_id, player_id, base_id, slot, item_level, rarity, quality,
+                  base_stats_json, affixes_json, unique_rule, bind_state, location, equipment_slot,
+                  locked, favorite, status, provenance_json, ruleset_version, content_version,
+                  source_ref, created_at
+           FROM item_instances
+           WHERE player_id = ?
+           ORDER BY status ASC, created_at DESC, item_id DESC`,
+        )
+        .bind(playerId),
+      this.db
+        .prepare(
+          `SELECT material_key, quantity
+           FROM material_balances WHERE player_id = ? ORDER BY material_key`,
+        )
+        .bind(playerId),
+      this.db
+        .prepare(
+          `SELECT entry_type, entry_id, first_seen_at, discovery_count
+           FROM codex_progress WHERE player_id = ? ORDER BY entry_type, entry_id`,
+        )
+        .bind(playerId),
+    ]);
+    const items = (results[0]?.results ?? []) as ItemRow[];
+    const materials = (results[1]?.results ?? []) as MaterialRow[];
+    const codex = (results[2]?.results ?? []) as CodexProgressRow[];
+    return inventoryViewFromRows(player.version, items, materials, codex);
+  }
+
   async rotateSession(currentSessionId: string, next: GuestSessionInput): Promise<void> {
     await this.db.batch([
       this.db
@@ -581,6 +845,18 @@ export class D1GuestDataRepository implements GuestDataRepository, ExplorationDa
   async resetGuest(accountId: string): Promise<void> {
     await this.db.batch([
       this.db.prepare('DELETE FROM idempotency_records WHERE account_id = ?').bind(accountId),
+      this.db.prepare('DELETE FROM economy_ledger WHERE account_id = ?').bind(accountId),
+      this.db.prepare('DELETE FROM item_instances WHERE account_id = ?').bind(accountId),
+      this.db
+        .prepare(
+          'DELETE FROM material_balances WHERE player_id IN (SELECT player_id FROM players WHERE account_id = ?)',
+        )
+        .bind(accountId),
+      this.db
+        .prepare(
+          'DELETE FROM codex_progress WHERE player_id IN (SELECT player_id FROM players WHERE account_id = ?)',
+        )
+        .bind(accountId),
       this.db
         .prepare(
           'DELETE FROM combat_resolutions WHERE route_run_id IN (SELECT route_run_id FROM route_runs WHERE account_id = ?)',
@@ -740,6 +1016,514 @@ export class D1GuestDataRepository implements GuestDataRepository, ExplorationDa
       );
     }
     return { player: JSON.parse(stored.response_json) as PlayerView, replayed: false };
+  }
+
+  async claimLoot(input: InventoryMutationInput): Promise<StoredInventoryMutationResult> {
+    const replay = await this.claimInventoryIdempotency(input);
+    if (replay) return replay;
+    try {
+      if (
+        !input.item ||
+        input.mintSeed === undefined ||
+        !input.sourceRef ||
+        !input.transactionId ||
+        input.ledgerEventIds?.length !== 1
+      ) {
+        throw new GuestRepositoryError(
+          'INVALID_INVENTORY_REQUEST',
+          'ドロップ情報が不足しています。',
+        );
+      }
+      const current = await this.getInventory(input.playerId);
+      if (!current)
+        throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'プレイヤーが見つかりません。');
+      if (current.items.filter((item) => item.status === 'active').length >= current.capacity) {
+        throw new GuestRepositoryError('INVENTORY_FULL', '持ち物の空きがありません。');
+      }
+
+      const next: InventoryView = {
+        ...current,
+        codex: addCodexEntries(current.codex, input.item, input.now),
+        items: [input.item, ...current.items],
+        playerVersion: current.playerVersion + 1,
+      };
+      const ledgerEventId = input.ledgerEventIds[0]!;
+      const statements: D1PreparedStatement[] = [
+        this.db
+          .prepare(
+            `INSERT INTO item_instances (
+               item_id, account_id, player_id, base_id, slot, item_level, rarity, quality,
+               base_stats_json, affixes_json, unique_rule, bind_state, location, equipment_slot,
+               locked, favorite, status, provenance_json, ruleset_version, content_version,
+               mint_seed, source_ref, created_at, updated_at, salvaged_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, NULL)`,
+          )
+          .bind(
+            input.item.id,
+            input.accountId,
+            input.playerId,
+            input.item.baseId,
+            input.item.slot,
+            input.item.itemLevel,
+            input.item.rarity,
+            input.item.quality,
+            JSON.stringify(input.item.baseStats),
+            JSON.stringify(input.item.affixes),
+            input.item.uniqueRule,
+            input.item.bindState,
+            input.item.location,
+            input.item.equipmentSlot,
+            input.item.locked ? 1 : 0,
+            input.item.favorite ? 1 : 0,
+            JSON.stringify(input.item.provenance),
+            input.item.provenance.rulesetVersion,
+            input.item.provenance.contentVersion,
+            input.mintSeed,
+            input.sourceRef,
+            input.now,
+            input.now,
+          ),
+        this.db
+          .prepare(
+            `INSERT INTO economy_ledger (
+               ledger_event_id, transaction_id, account_id, player_id, asset_type,
+               asset_instance_id, material_key, quantity_delta, reason_code, source_ref_type,
+               source_ref_id, ruleset_version, content_version, idempotency_key_hash,
+               metadata_json, created_at
+             ) VALUES (?, ?, ?, ?, 'item', ?, NULL, 1, 'LOOT_ITEM_MINT', 'loot', ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            ledgerEventId,
+            input.transactionId,
+            input.accountId,
+            input.playerId,
+            input.item.id,
+            input.sourceRef,
+            input.item.provenance.rulesetVersion,
+            input.item.provenance.contentVersion,
+            input.inputHash,
+            JSON.stringify({
+              affixIds: input.item.affixes.map((affix) => affix.id),
+              rarity: input.item.rarity,
+            }),
+            input.now,
+          ),
+        ...codexEntriesForItem(input.item).map(({ entryId, entryType }) =>
+          this.db
+            .prepare(
+              `INSERT INTO codex_progress (player_id, entry_type, entry_id, first_seen_at, discovery_count)
+               VALUES (?, ?, ?, ?, 1)
+               ON CONFLICT(player_id, entry_type, entry_id)
+               DO UPDATE SET discovery_count = codex_progress.discovery_count + 1`,
+            )
+            .bind(input.playerId, entryType, entryId, input.now),
+        ),
+        this.inventoryIdempotencyUpdate(
+          input,
+          storedInventoryResponse({ inventory: next, ledgerEventIds: [ledgerEventId] }),
+        ),
+        this.db
+          .prepare(
+            `UPDATE players SET version = ?, updated_at = ?
+             WHERE player_id = ? AND account_id = ? AND version = ?`,
+          )
+          .bind(
+            next.playerVersion,
+            input.now,
+            input.playerId,
+            input.accountId,
+            current.playerVersion,
+          ),
+        this.mutationGuard(),
+      ];
+      const results = await this.db.batch(statements);
+      const playerUpdate = results[statements.length - 2]?.meta?.changes;
+      if (Number(playerUpdate ?? 0) !== 1) {
+        throw new GuestRepositoryError(
+          'INVENTORY_STATE_CONFLICT',
+          '持ち物の状態が更新されました。最新状態を取得してください。',
+        );
+      }
+      return { inventory: next, ledgerEventIds: [ledgerEventId], replayed: false };
+    } catch (error) {
+      await this.releaseInventoryIdempotency(input);
+      throw normalizeInventoryMutationError(error);
+    }
+  }
+
+  async equipItem(input: InventoryMutationInput): Promise<StoredInventoryMutationResult> {
+    const replay = await this.claimInventoryIdempotency(input);
+    if (replay) return replay;
+    try {
+      if (!input.itemId || !input.mode || input.expectedVersion === undefined) {
+        throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', '装備操作が不足しています。');
+      }
+      const current = await this.getInventory(input.playerId);
+      if (!current)
+        throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'プレイヤーが見つかりません。');
+      if (current.playerVersion !== input.expectedVersion) {
+        throw new GuestRepositoryError(
+          'INVENTORY_STATE_CONFLICT',
+          '持ち物のversionが古くなっています。',
+        );
+      }
+      const selected = current.items.find(
+        (item) => item.id === input.itemId && item.status === 'active',
+      );
+      if (!selected)
+        throw new GuestRepositoryError('ITEM_NOT_FOUND', '対象アイテムが見つかりません。');
+
+      let nextItems: LootItemInstance[];
+      const statements: D1PreparedStatement[] = [];
+      if (input.mode === 'equip') {
+        if (selected.location === 'equipment') {
+          throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', 'そのアイテムは装備中です。');
+        }
+        const replaced = current.items.find(
+          (item) =>
+            item.status === 'active' &&
+            item.location === 'equipment' &&
+            item.equipmentSlot === selected.slot,
+        );
+        nextItems = current.items.map((item) => {
+          if (replaced && item.id === replaced.id) {
+            return {
+              ...item,
+              bindState: 'account-bound',
+              equipmentSlot: null,
+              location: 'inventory',
+            };
+          }
+          if (item.id === selected.id) {
+            return {
+              ...item,
+              bindState: 'account-bound',
+              equipmentSlot: item.slot,
+              location: 'equipment',
+            };
+          }
+          return item;
+        });
+        if (replaced) {
+          statements.push(
+            this.db
+              .prepare(
+                `UPDATE item_instances SET location = 'inventory', equipment_slot = NULL,
+                        bind_state = 'account-bound', updated_at = ?
+                 WHERE item_id = ? AND player_id = ? AND status = 'active'`,
+              )
+              .bind(input.now, replaced.id, input.playerId),
+          );
+        }
+        statements.push(
+          this.db
+            .prepare(
+              `UPDATE item_instances SET location = 'equipment', equipment_slot = ?,
+                      bind_state = 'account-bound', updated_at = ?
+               WHERE item_id = ? AND player_id = ? AND status = 'active'`,
+            )
+            .bind(selected.slot, input.now, selected.id, input.playerId),
+        );
+      } else {
+        if (selected.location !== 'equipment') {
+          throw new GuestRepositoryError(
+            'INVALID_INVENTORY_REQUEST',
+            'そのアイテムは装備されていません。',
+          );
+        }
+        nextItems = current.items.map((item) =>
+          item.id === selected.id ? { ...item, equipmentSlot: null, location: 'inventory' } : item,
+        );
+        statements.push(
+          this.db
+            .prepare(
+              `UPDATE item_instances SET location = 'inventory', equipment_slot = NULL,
+                      updated_at = ?
+               WHERE item_id = ? AND player_id = ? AND status = 'active' AND location = 'equipment'`,
+            )
+            .bind(input.now, selected.id, input.playerId),
+        );
+      }
+
+      const next: InventoryView = {
+        ...current,
+        items: nextItems,
+        playerVersion: current.playerVersion + 1,
+      };
+      statements.push(
+        this.inventoryIdempotencyUpdate(
+          input,
+          storedInventoryResponse({ inventory: next, ledgerEventIds: [] }),
+        ),
+        this.db
+          .prepare(
+            `UPDATE players SET version = ?, updated_at = ?
+             WHERE player_id = ? AND account_id = ? AND version = ?`,
+          )
+          .bind(
+            next.playerVersion,
+            input.now,
+            input.playerId,
+            input.accountId,
+            current.playerVersion,
+          ),
+        this.mutationGuard(),
+      );
+      const results = await this.db.batch(statements);
+      const playerUpdate = results[statements.length - 2]?.meta?.changes;
+      if (Number(playerUpdate ?? 0) !== 1) {
+        throw new GuestRepositoryError('INVENTORY_STATE_CONFLICT', '装備状態が競合しました。');
+      }
+      return { inventory: next, ledgerEventIds: [], replayed: false };
+    } catch (error) {
+      await this.releaseInventoryIdempotency(input);
+      throw normalizeInventoryMutationError(error);
+    }
+  }
+
+  async markItem(input: InventoryMutationInput): Promise<StoredInventoryMutationResult> {
+    const replay = await this.claimInventoryIdempotency(input);
+    if (replay) return replay;
+    try {
+      if (
+        !input.itemId ||
+        input.expectedVersion === undefined ||
+        input.locked === undefined ||
+        input.favorite === undefined
+      ) {
+        throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', '保護設定が不足しています。');
+      }
+      const current = await this.getInventory(input.playerId);
+      if (!current)
+        throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'プレイヤーが見つかりません。');
+      if (current.playerVersion !== input.expectedVersion) {
+        throw new GuestRepositoryError(
+          'INVENTORY_STATE_CONFLICT',
+          '持ち物のversionが古くなっています。',
+        );
+      }
+      const item = current.items.find(
+        (candidate) => candidate.id === input.itemId && candidate.status === 'active',
+      );
+      if (!item) throw new GuestRepositoryError('ITEM_NOT_FOUND', '対象アイテムが見つかりません。');
+      const next: InventoryView = {
+        ...current,
+        items: current.items.map((candidate) =>
+          candidate.id === item.id
+            ? { ...candidate, favorite: input.favorite!, locked: input.locked! }
+            : candidate,
+        ),
+        playerVersion: current.playerVersion + 1,
+      };
+      const results = await this.db.batch([
+        this.db
+          .prepare(
+            `UPDATE item_instances SET locked = ?, favorite = ?, updated_at = ?
+             WHERE item_id = ? AND player_id = ? AND status = 'active'`,
+          )
+          .bind(input.locked ? 1 : 0, input.favorite ? 1 : 0, input.now, item.id, input.playerId),
+        this.inventoryIdempotencyUpdate(
+          input,
+          storedInventoryResponse({ inventory: next, ledgerEventIds: [] }),
+        ),
+        this.db
+          .prepare(
+            `UPDATE players SET version = ?, updated_at = ?
+             WHERE player_id = ? AND account_id = ? AND version = ?`,
+          )
+          .bind(
+            next.playerVersion,
+            input.now,
+            input.playerId,
+            input.accountId,
+            current.playerVersion,
+          ),
+        this.mutationGuard(),
+      ]);
+      if (Number(results[results.length - 2]?.meta?.changes ?? 0) !== 1) {
+        throw new GuestRepositoryError('INVENTORY_STATE_CONFLICT', '保護設定が競合しました。');
+      }
+      return { inventory: next, ledgerEventIds: [], replayed: false };
+    } catch (error) {
+      await this.releaseInventoryIdempotency(input);
+      throw normalizeInventoryMutationError(error);
+    }
+  }
+
+  async salvageItems(input: InventoryMutationInput): Promise<StoredInventoryMutationResult> {
+    const replay = await this.claimInventoryIdempotency(input);
+    if (replay) return replay;
+    try {
+      if (
+        !input.itemIds ||
+        input.itemIds.length === 0 ||
+        input.itemIds.length > 20 ||
+        input.expectedVersion === undefined ||
+        input.confirm === undefined ||
+        input.unlock === undefined ||
+        !input.transactionId ||
+        !input.ledgerEventIds ||
+        input.ledgerEventIds.length !== input.itemIds.length + 1
+      ) {
+        throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', '分解対象が不正です。');
+      }
+      if (new Set(input.itemIds).size !== input.itemIds.length) {
+        throw new GuestRepositoryError(
+          'INVALID_INVENTORY_REQUEST',
+          '同じアイテムを重複指定できません。',
+        );
+      }
+      const current = await this.getInventory(input.playerId);
+      if (!current)
+        throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'プレイヤーが見つかりません。');
+      if (current.playerVersion !== input.expectedVersion) {
+        throw new GuestRepositoryError(
+          'INVENTORY_STATE_CONFLICT',
+          '持ち物のversionが古くなっています。',
+        );
+      }
+      const selected = input.itemIds.map((itemId) => {
+        const item = current.items.find(
+          (candidate) => candidate.id === itemId && candidate.status === 'active',
+        );
+        if (!item) throw new GuestRepositoryError('ITEM_NOT_FOUND', '分解対象が見つかりません。');
+        if (item.location === 'equipment') {
+          throw new GuestRepositoryError('ITEM_EQUIPPED', '装備中のアイテムは先に外してください。');
+        }
+        if (['rare', 'unique', 'relic'].includes(item.rarity) && !input.confirm) {
+          throw new GuestRepositoryError('CONFIRMATION_REQUIRED', 'Rare以上は明示確認が必要です。');
+        }
+        if ((item.locked || item.favorite) && !input.unlock) {
+          throw new GuestRepositoryError(
+            'ITEM_PROTECTED',
+            'ロックまたはfavorite保護を解除してください。',
+          );
+        }
+        return item;
+      });
+      const materialDelta = selected.reduce(
+        (total, item) => total + calculateSalvage(item).quantity,
+        0,
+      );
+      const materialKey = 'material.scrap';
+      const next: InventoryView = {
+        ...current,
+        items: current.items.map((item) =>
+          selected.some((candidate) => candidate.id === item.id)
+            ? {
+                ...item,
+                equipmentSlot: null,
+                favorite: false,
+                location: 'inventory',
+                locked: false,
+                status: 'salvaged',
+              }
+            : item,
+        ),
+        materials: {
+          ...current.materials,
+          [materialKey]: (current.materials[materialKey] ?? 0) + materialDelta,
+        },
+        playerVersion: current.playerVersion + 1,
+      };
+      const statements: D1PreparedStatement[] = [];
+      for (const [index, item] of selected.entries()) {
+        const eventId = input.ledgerEventIds[index]!;
+        statements.push(
+          this.db
+            .prepare(
+              `UPDATE item_instances
+               SET status = 'salvaged', location = 'inventory', equipment_slot = NULL,
+                   locked = 0, favorite = 0, salvaged_at = ?, updated_at = ?
+               WHERE item_id = ? AND player_id = ? AND status = 'active'`,
+            )
+            .bind(input.now, input.now, item.id, input.playerId),
+          this.db
+            .prepare(
+              `INSERT INTO economy_ledger (
+                 ledger_event_id, transaction_id, account_id, player_id, asset_type,
+                 asset_instance_id, material_key, quantity_delta, reason_code, source_ref_type,
+                 source_ref_id, ruleset_version, content_version, idempotency_key_hash,
+                 metadata_json, created_at
+               ) VALUES (?, ?, ?, ?, 'item', ?, NULL, -1, 'ITEM_SALVAGE_CONSUME', 'salvage', ?, ?, ?, ?, ?, ?)`,
+            )
+            .bind(
+              eventId,
+              input.transactionId,
+              input.accountId,
+              input.playerId,
+              item.id,
+              input.sourceRef ?? 'inventory.salvage',
+              item.provenance.rulesetVersion,
+              item.provenance.contentVersion,
+              input.inputHash,
+              JSON.stringify({ rarity: item.rarity, scrap: calculateSalvage(item).quantity }),
+              input.now,
+            ),
+        );
+      }
+      const materialEventId = input.ledgerEventIds.at(-1)!;
+      statements.push(
+        this.db
+          .prepare(
+            `INSERT INTO material_balances (player_id, material_key, quantity, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(player_id, material_key)
+             DO UPDATE SET quantity = material_balances.quantity + excluded.quantity,
+                           updated_at = excluded.updated_at`,
+          )
+          .bind(input.playerId, materialKey, materialDelta, input.now),
+        this.db
+          .prepare(
+            `INSERT INTO economy_ledger (
+               ledger_event_id, transaction_id, account_id, player_id, asset_type,
+               asset_instance_id, material_key, quantity_delta, reason_code, source_ref_type,
+               source_ref_id, ruleset_version, content_version, idempotency_key_hash,
+               metadata_json, created_at
+             ) VALUES (?, ?, ?, ?, 'material', NULL, ?, ?, 'MATERIAL_SALVAGE_GRANT', 'salvage', ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            materialEventId,
+            input.transactionId,
+            input.accountId,
+            input.playerId,
+            materialKey,
+            materialDelta,
+            input.sourceRef ?? 'inventory.salvage',
+            '1.0.0',
+            '0.1.0',
+            input.inputHash,
+            JSON.stringify({ itemIds: input.itemIds, quantity: materialDelta }),
+            input.now,
+          ),
+        this.inventoryIdempotencyUpdate(
+          input,
+          storedInventoryResponse({ inventory: next, ledgerEventIds: [...input.ledgerEventIds] }),
+        ),
+        this.db
+          .prepare(
+            `UPDATE players SET version = ?, updated_at = ?
+             WHERE player_id = ? AND account_id = ? AND version = ?`,
+          )
+          .bind(
+            next.playerVersion,
+            input.now,
+            input.playerId,
+            input.accountId,
+            current.playerVersion,
+          ),
+        this.mutationGuard(),
+      );
+      const results = await this.db.batch(statements);
+      const playerUpdate = results[statements.length - 2]?.meta?.changes;
+      if (Number(playerUpdate ?? 0) !== 1) {
+        throw new GuestRepositoryError('INVENTORY_STATE_CONFLICT', '分解状態が競合しました。');
+      }
+      return { inventory: next, ledgerEventIds: [...input.ledgerEventIds], replayed: false };
+    } catch (error) {
+      await this.releaseInventoryIdempotency(input);
+      throw normalizeInventoryMutationError(error);
+    }
   }
 
   async getCurrentRoute(playerId: string, now: string): Promise<ExplorationRunView | null> {
@@ -1195,6 +1979,112 @@ export class D1GuestDataRepository implements GuestDataRepository, ExplorationDa
       )
       .bind(input.accountId, input.action, input.idempotencyKey, input.now)
       .first<ExplorationIdempotencyRow>();
+  }
+
+  private async claimInventoryIdempotency(
+    input: InventoryMutationInput,
+  ): Promise<StoredInventoryMutationResult | null> {
+    const existing = await this.getInventoryIdempotency(input);
+    if (existing) {
+      if (existing.input_hash !== input.inputHash) {
+        throw new GuestRepositoryError(
+          'IDEMPOTENCY_KEY_REUSED',
+          '同じIdempotency-Keyに別の内容は指定できません。',
+        );
+      }
+      if (existing.response_json === PENDING_RESPONSE) {
+        throw new GuestRepositoryError(
+          'IDEMPOTENCY_IN_PROGRESS',
+          '同じ操作が処理中です。同じキーで再試行してください。',
+        );
+      }
+      const stored = parseInventoryJson<StoredInventoryResponse>(
+        existing.response_json,
+        '保存されたinventory結果',
+      );
+      return { ...stored, replayed: true };
+    }
+    const where = 'account_id = ? AND action = ? AND idempotency_key = ?';
+    const values = [input.accountId, input.action, input.idempotencyKey];
+    const results = await this.db.batch([
+      this.db
+        .prepare(`DELETE FROM idempotency_records WHERE ${where} AND expires_at <= ?`)
+        .bind(...values, input.now),
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO idempotency_records
+             (account_id, action, idempotency_key, input_hash, response_json, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          input.accountId,
+          input.action,
+          input.idempotencyKey,
+          input.inputHash,
+          PENDING_RESPONSE,
+          input.now,
+          input.expiresAt,
+        ),
+    ]);
+    if (Number(results[1]?.meta?.changes ?? 0) === 1) return null;
+    const raced = await this.getInventoryIdempotency(input);
+    if (raced?.input_hash !== input.inputHash) {
+      throw new GuestRepositoryError(
+        'IDEMPOTENCY_KEY_REUSED',
+        '同じIdempotency-Keyに別の内容は指定できません。',
+      );
+    }
+    if (!raced || raced.response_json === PENDING_RESPONSE) {
+      throw new GuestRepositoryError(
+        'IDEMPOTENCY_IN_PROGRESS',
+        '同じ操作が処理中です。同じキーで再試行してください。',
+      );
+    }
+    const stored = parseInventoryJson<StoredInventoryResponse>(
+      raced.response_json,
+      '保存されたinventory結果',
+    );
+    return { ...stored, replayed: true };
+  }
+
+  private inventoryIdempotencyUpdate(
+    input: InventoryMutationInput,
+    responseJson: string,
+  ): D1PreparedStatement {
+    return this.db
+      .prepare(
+        `UPDATE idempotency_records SET response_json = ?
+         WHERE account_id = ? AND action = ? AND idempotency_key = ? AND response_json = ?`,
+      )
+      .bind(responseJson, input.accountId, input.action, input.idempotencyKey, PENDING_RESPONSE);
+  }
+
+  private mutationGuard(): D1PreparedStatement {
+    return this.db.prepare(
+      `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json('inventory_mutation_conflict') END AS mutation_guard`,
+    );
+  }
+
+  private async releaseInventoryIdempotency(input: InventoryMutationInput): Promise<void> {
+    await this.db
+      .prepare(
+        `DELETE FROM idempotency_records
+         WHERE account_id = ? AND action = ? AND idempotency_key = ? AND response_json = ?`,
+      )
+      .bind(input.accountId, input.action, input.idempotencyKey, PENDING_RESPONSE)
+      .run();
+  }
+
+  private async getInventoryIdempotency(
+    input: InventoryMutationInput,
+  ): Promise<InventoryIdempotencyRow | null> {
+    return this.db
+      .prepare(
+        `SELECT input_hash, response_json, expires_at FROM idempotency_records
+         WHERE account_id = ? AND action = ? AND idempotency_key = ? AND expires_at > ?`,
+      )
+      .bind(input.accountId, input.action, input.idempotencyKey, input.now)
+      .first<InventoryIdempotencyRow>();
   }
 
   async consumeRateLimit(input: RateLimitInput): Promise<boolean> {

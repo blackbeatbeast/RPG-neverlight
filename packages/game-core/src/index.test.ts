@@ -6,6 +6,10 @@ import {
   CombatInputError,
   ENEMY_PATTERN_SPECS,
   createCombatState,
+  calculateSalvage,
+  deriveEquipmentStats,
+  lootBoundsReport,
+  resolveLootDrop,
   resolveCombat,
   sampleDeterministicValue,
   stableStringify,
@@ -202,5 +206,68 @@ describe('resolveCombat', () => {
     expect(patterns).toHaveLength(3);
     expect(new Set(counterplay).size).toBe(3);
     expect(counterplay).toEqual(['guard', 'pierce', 'avoid']);
+  });
+});
+
+describe('resolveLootDrop', () => {
+  it('replays the same bounded item from the same seed and content version', () => {
+    const options = {
+      contentVersion: '0.1.0',
+      itemId: 'item-test-1',
+      seed: 0x1234,
+      sourceRef: 'rain-tower.cache',
+    };
+    const first = resolveLootDrop(options);
+    const second = resolveLootDrop(options);
+
+    expect(first).toEqual(second);
+    const bounds = lootBoundsReport(first.item);
+    expect(bounds.affixCount).toBeLessThanOrEqual(bounds.maxAffixes);
+    expect(bounds.affixBudget).toBeLessThanOrEqual(bounds.maxBudget);
+    expect(bounds.qualityInRange).toBe(true);
+    expect(first.item.provenance.seedHash).toMatch(/^fnv1a32:[0-9a-f]{8}$/);
+  });
+
+  it('keeps rare drops explicit and derives equipment stats from authoritative items', () => {
+    const rare = resolveLootDrop({
+      itemId: 'item-rare-1',
+      minimumRarity: 'rare',
+      seed: 7,
+      sourceRef: 'rain-tower.boss',
+    }).item;
+    const derived = deriveEquipmentStats(
+      {
+        armor: 0,
+        attack: 0,
+        focus: 3,
+        guard: 0,
+        luck: 0,
+        maxFocus: 3,
+        maxVitality: 10,
+        speed: 5,
+        vitality: 10,
+        ward: 0,
+      },
+      [{ ...rare, location: 'equipment', equipmentSlot: rare.slot }],
+    );
+
+    expect(['rare', 'unique', 'relic']).toContain(rare.rarity);
+    expect(derived.explanations).toHaveLength(1);
+    expect(derived.attack + derived.armor + derived.ward).toBeGreaterThan(0);
+    expect(calculateSalvage(rare).quantity).toBeGreaterThanOrEqual(4);
+  });
+
+  it('keeps 10,000 fixed seeds inside the declared quality and affix caps', () => {
+    for (let seed = 0; seed < 10_000; seed += 1) {
+      const item = resolveLootDrop({
+        itemId: `item-${seed}`,
+        seed,
+        sourceRef: 'simulation.fixture',
+      }).item;
+      const bounds = lootBoundsReport(item);
+      expect(bounds.affixCount).toBeLessThanOrEqual(bounds.maxAffixes);
+      expect(bounds.affixBudget).toBeLessThanOrEqual(bounds.maxBudget);
+      expect(bounds.qualityInRange).toBe(true);
+    }
   });
 });

@@ -90,6 +90,10 @@ importers:
         version: 4.4.3
 
   packages/db:
+    dependencies:
+      '@neverlight/game-core':
+        specifier: workspace:*
+        version: link:../game-core
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20260819.1

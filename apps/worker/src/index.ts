@@ -10,6 +10,8 @@ import {
   type AuthenticatedSession,
   type GuestDataRepository,
   type GuestSessionInput,
+  type InventoryMutationInput,
+  type InventoryView,
   type PlayerPreferences,
 } from '@neverlight/db';
 
@@ -17,6 +19,10 @@ import {
   COMBAT_RULESET_VERSION,
   CombatInputError,
   createCombatState,
+  deriveEquipmentStats,
+  LOOT_CONTENT_VERSION,
+  LOOT_RULESET_VERSION,
+  resolveLootDrop,
   resolveCombat,
   type CombatCommand,
   type CombatResolution,
@@ -42,7 +48,12 @@ import {
   sha256Hex,
   stableJson,
 } from './security.js';
-import type { HealthResponse, WorkerBindings, WorkerRepositoryFactory } from './types.js';
+import type {
+  HealthResponse,
+  WorkerBindings,
+  WorkerRepository,
+  WorkerRepositoryFactory,
+} from './types.js';
 
 type WorkerEnvironment = {
   Bindings: WorkerBindings;
@@ -63,6 +74,10 @@ const ROUTE_START_ACTION = 'route.start';
 const ROUTE_CHOOSE_ACTION = 'route.choose';
 const COMBAT_RESOLVE_ACTION = 'route.combat.resolve';
 const ROUTE_EXIT_ACTION = 'route.exit';
+const INVENTORY_LOOT_ACTION = 'inventory.loot.claim';
+const INVENTORY_EQUIP_ACTION = 'inventory.item.equip';
+const INVENTORY_MARK_ACTION = 'inventory.item.mark';
+const INVENTORY_SALVAGE_ACTION = 'inventory.items.salvage';
 
 const defaultRepositoryFactory: WorkerRepositoryFactory = (env) => createD1GuestRepository(env.DB);
 
@@ -430,6 +445,306 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
     }
   });
 
+  app.get('/api/v1/inventory', async (context) => {
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    const inventory = await repository.getInventory(session.playerId);
+    if (!inventory)
+      return errorResponse(context, 404, 'PLAYER_NOT_FOUND', 'プレイヤーが見つかりません。');
+    context.header('Cache-Control', 'no-store');
+    return context.json({
+      inventory: await publicInventory(repository, session.playerId, inventory),
+    });
+  });
+
+  app.post('/api/v1/inventory/loot/claim', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    if (!(await hasCsrf(context, session))) {
+      return errorResponse(
+        context,
+        403,
+        'CSRF_INVALID',
+        '安全確認に失敗しました。ページを更新してください。',
+      );
+    }
+    const idempotencyKey = context.req.header('Idempotency-Key');
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(
+        context,
+        400,
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key が必要です。',
+      );
+    }
+    const body = await readJson(context);
+    if (!body.ok) return errorResponse(context, 400, 'INVALID_JSON', body.message);
+    const parsed = parseLootClaimRequest(body.value);
+    if (!parsed.ok) return errorResponse(context, parsed.status, parsed.code, parsed.message);
+    if (!(await allowRate(repository, INVENTORY_LOOT_ACTION, session.accountId, 10, 60))) {
+      return errorResponse(
+        context,
+        429,
+        'RATE_LIMITED',
+        'ドロップ取得が多すぎます。少し待ってください。',
+        {
+          'Retry-After': '60',
+        },
+      );
+    }
+    const seed = randomSeed();
+    const itemId = createOpaqueId('item');
+    const loot =
+      parsed.value.sourceRef === 'rain-tower.boss'
+        ? resolveLootDrop({
+            itemId,
+            minimumRarity: 'rare',
+            seed,
+            sourceRef: parsed.value.sourceRef,
+          })
+        : resolveLootDrop({ itemId, seed, sourceRef: parsed.value.sourceRef });
+    const input: InventoryMutationInput = {
+      accountId: session.accountId,
+      action: INVENTORY_LOOT_ACTION,
+      contentVersion: LOOT_CONTENT_VERSION,
+      expiresAt: futureIso(IDEMPOTENCY_TTL_SECONDS),
+      idempotencyKey,
+      inputHash: await sha256Hex(stableJson(parsed.value)),
+      item: loot.item,
+      ledgerEventIds: [createOpaqueId('ledger')],
+      mintSeed: loot.seed,
+      now: nowIso(),
+      playerId: session.playerId,
+      rulesetVersion: LOOT_RULESET_VERSION,
+      sourceRef: parsed.value.sourceRef,
+      transactionId: createOpaqueId('txn'),
+    };
+    try {
+      const result = await repository.claimLoot(input);
+      if (result.replayed) context.header('Idempotency-Replayed', 'true');
+      context.header('Cache-Control', 'no-store');
+      logEvent(context, INVENTORY_LOOT_ACTION, result.replayed ? 'replayed' : 'minted');
+      return context.json(
+        {
+          inventory: await publicInventory(repository, session.playerId, result.inventory),
+          ledgerEventIds: result.ledgerEventIds,
+          replayed: result.replayed,
+        },
+        result.replayed ? 200 : 201,
+      );
+    } catch (error) {
+      return repositoryErrorResponse(context, error);
+    }
+  });
+
+  app.post('/api/v1/inventory/equip', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    if (!(await hasCsrf(context, session))) {
+      return errorResponse(
+        context,
+        403,
+        'CSRF_INVALID',
+        '安全確認に失敗しました。ページを更新してください。',
+      );
+    }
+    const idempotencyKey = context.req.header('Idempotency-Key');
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(
+        context,
+        400,
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key が必要です。',
+      );
+    }
+    const body = await readJson(context);
+    if (!body.ok) return errorResponse(context, 400, 'INVALID_JSON', body.message);
+    const parsed = parseInventoryEquipRequest(body.value);
+    if (!parsed.ok) return errorResponse(context, parsed.status, parsed.code, parsed.message);
+    if (!(await allowRate(repository, INVENTORY_EQUIP_ACTION, session.accountId, 30, 60))) {
+      return errorResponse(
+        context,
+        429,
+        'RATE_LIMITED',
+        '装備操作が多すぎます。少し待ってください。',
+        {
+          'Retry-After': '60',
+        },
+      );
+    }
+    const input: InventoryMutationInput = {
+      accountId: session.accountId,
+      action: INVENTORY_EQUIP_ACTION,
+      expectedVersion: parsed.value.expectedVersion,
+      expiresAt: futureIso(IDEMPOTENCY_TTL_SECONDS),
+      idempotencyKey,
+      inputHash: await sha256Hex(stableJson(parsed.value)),
+      itemId: parsed.value.itemId,
+      mode: parsed.value.mode,
+      now: nowIso(),
+      playerId: session.playerId,
+    };
+    try {
+      const result = await repository.equipItem(input);
+      if (result.replayed) context.header('Idempotency-Replayed', 'true');
+      context.header('Cache-Control', 'no-store');
+      return context.json({
+        inventory: await publicInventory(repository, session.playerId, result.inventory),
+        replayed: result.replayed,
+      });
+    } catch (error) {
+      return repositoryErrorResponse(context, error);
+    }
+  });
+
+  app.post('/api/v1/inventory/mark', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    if (!(await hasCsrf(context, session))) {
+      return errorResponse(
+        context,
+        403,
+        'CSRF_INVALID',
+        '安全確認に失敗しました。ページを更新してください。',
+      );
+    }
+    const idempotencyKey = context.req.header('Idempotency-Key');
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(
+        context,
+        400,
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key が必要です。',
+      );
+    }
+    const body = await readJson(context);
+    if (!body.ok) return errorResponse(context, 400, 'INVALID_JSON', body.message);
+    const parsed = parseInventoryMarkRequest(body.value);
+    if (!parsed.ok) return errorResponse(context, parsed.status, parsed.code, parsed.message);
+    if (!(await allowRate(repository, INVENTORY_MARK_ACTION, session.accountId, 60, 60))) {
+      return errorResponse(
+        context,
+        429,
+        'RATE_LIMITED',
+        '保護設定の変更が多すぎます。少し待ってください。',
+        {
+          'Retry-After': '60',
+        },
+      );
+    }
+    const input: InventoryMutationInput = {
+      accountId: session.accountId,
+      action: INVENTORY_MARK_ACTION,
+      expectedVersion: parsed.value.expectedVersion,
+      expiresAt: futureIso(IDEMPOTENCY_TTL_SECONDS),
+      favorite: parsed.value.favorite,
+      idempotencyKey,
+      inputHash: await sha256Hex(stableJson(parsed.value)),
+      itemId: parsed.value.itemId,
+      locked: parsed.value.locked,
+      now: nowIso(),
+      playerId: session.playerId,
+    };
+    try {
+      const result = await repository.markItem(input);
+      if (result.replayed) context.header('Idempotency-Replayed', 'true');
+      context.header('Cache-Control', 'no-store');
+      return context.json({
+        inventory: await publicInventory(repository, session.playerId, result.inventory),
+        replayed: result.replayed,
+      });
+    } catch (error) {
+      return repositoryErrorResponse(context, error);
+    }
+  });
+
+  app.post('/api/v1/inventory/salvage', async (context) => {
+    const blocked = ensureWritable(context);
+    if (blocked) return blocked;
+    const repository = repositoryFactory(context.env);
+    const session = await requireSession(context, repository);
+    if (!session)
+      return errorResponse(context, 401, 'UNAUTHENTICATED', 'ゲストセッションがありません。');
+    if (!(await hasCsrf(context, session))) {
+      return errorResponse(
+        context,
+        403,
+        'CSRF_INVALID',
+        '安全確認に失敗しました。ページを更新してください。',
+      );
+    }
+    const idempotencyKey = context.req.header('Idempotency-Key');
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(
+        context,
+        400,
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key が必要です。',
+      );
+    }
+    const body = await readJson(context);
+    if (!body.ok) return errorResponse(context, 400, 'INVALID_JSON', body.message);
+    const parsed = parseInventorySalvageRequest(body.value);
+    if (!parsed.ok) return errorResponse(context, parsed.status, parsed.code, parsed.message);
+    if (!(await allowRate(repository, INVENTORY_SALVAGE_ACTION, session.accountId, 30, 60))) {
+      return errorResponse(
+        context,
+        429,
+        'RATE_LIMITED',
+        '分解操作が多すぎます。少し待ってください。',
+        {
+          'Retry-After': '60',
+        },
+      );
+    }
+    const input: InventoryMutationInput = {
+      accountId: session.accountId,
+      action: INVENTORY_SALVAGE_ACTION,
+      confirm: parsed.value.confirm,
+      expectedVersion: parsed.value.expectedVersion,
+      expiresAt: futureIso(IDEMPOTENCY_TTL_SECONDS),
+      idempotencyKey,
+      inputHash: await sha256Hex(stableJson(parsed.value)),
+      itemIds: parsed.value.itemIds,
+      ledgerEventIds: [
+        ...parsed.value.itemIds.map(() => createOpaqueId('ledger')),
+        createOpaqueId('ledger'),
+      ],
+      now: nowIso(),
+      playerId: session.playerId,
+      sourceRef: 'inventory.salvage',
+      transactionId: createOpaqueId('txn'),
+      unlock: parsed.value.unlock,
+    };
+    try {
+      const result = await repository.salvageItems(input);
+      if (result.replayed) context.header('Idempotency-Replayed', 'true');
+      context.header('Cache-Control', 'no-store');
+      logEvent(context, INVENTORY_SALVAGE_ACTION, result.replayed ? 'replayed' : 'consumed');
+      return context.json({
+        inventory: await publicInventory(repository, session.playerId, result.inventory),
+        ledgerEventIds: result.ledgerEventIds,
+        replayed: result.replayed,
+      });
+    } catch (error) {
+      return repositoryErrorResponse(context, error);
+    }
+  });
+
   app.post('/api/v1/guest/start', async (context) => {
     const blocked = ensureWritable(context);
     if (blocked) return blocked;
@@ -686,6 +1001,31 @@ function publicRoute(route: ExplorationRunView): Omit<ExplorationRunView, 'serve
   };
 }
 
+async function publicInventory(
+  repository: WorkerRepository,
+  playerId: string,
+  inventory: InventoryView,
+): Promise<InventoryView & { derivedStats: ReturnType<typeof deriveEquipmentStats> }> {
+  const player = await repository.getPlayer(playerId);
+  if (!player) throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'プレイヤーが見つかりません。');
+  const derivedStats = deriveEquipmentStats(
+    {
+      armor: 0,
+      attack: 0,
+      focus: player.stats.focus,
+      guard: player.stats.guard,
+      luck: player.stats.luck,
+      maxFocus: player.stats.maxFocus,
+      maxVitality: player.stats.maxVitality,
+      speed: player.stats.speed,
+      vitality: player.stats.vitality,
+      ward: 0,
+    },
+    inventory.items,
+  );
+  return { ...inventory, derivedStats };
+}
+
 function publicResolutionValue(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const candidate = value as Partial<CombatResolution>;
@@ -714,6 +1054,21 @@ type EmptyRequest = Record<string, never>;
 type ExpectedVersionRequest = { expectedVersion: number };
 type ChooseRequest = ExpectedVersionRequest & { nodeId: 'encounter' };
 type CombatRequest = ExpectedVersionRequest & { commands: CombatCommand[] };
+type LootClaimRequest = { sourceRef: 'rain-tower.boss' | 'rain-tower.cache' };
+type InventoryEquipRequest = ExpectedVersionRequest & {
+  itemId: string;
+  mode: 'equip' | 'unequip';
+};
+type InventoryMarkRequest = ExpectedVersionRequest & {
+  favorite: boolean;
+  itemId: string;
+  locked: boolean;
+};
+type InventorySalvageRequest = ExpectedVersionRequest & {
+  confirm: boolean;
+  itemIds: string[];
+  unlock: boolean;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -823,6 +1178,129 @@ function parseCombatRequest(value: unknown): RequestParseResult<CombatRequest> {
     commands.push(parsed);
   }
   return { ok: true, value: { expectedVersion, commands } };
+}
+
+function parseLootClaimRequest(value: unknown): RequestParseResult<LootClaimRequest> {
+  if (!isRecord(value) || !hasExactKeys(value, ['sourceRef'])) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INVENTORY_REQUEST',
+      message: 'ドロップ取得の形式が不正です。',
+    };
+  }
+  if (value.sourceRef !== 'rain-tower.cache' && value.sourceRef !== 'rain-tower.boss') {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INVENTORY_REQUEST',
+      message: '許可されたドロップ源だけ指定できます。',
+    };
+  }
+  return { ok: true, value: { sourceRef: value.sourceRef } };
+}
+
+function parseInventoryEquipRequest(value: unknown): RequestParseResult<InventoryEquipRequest> {
+  if (!isRecord(value) || !hasExactKeys(value, ['expectedVersion', 'itemId', 'mode'])) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INVENTORY_REQUEST',
+      message: '装備操作の形式が不正です。',
+    };
+  }
+  const expectedVersion = parseExpectedVersion(value.expectedVersion);
+  if (
+    expectedVersion === null ||
+    !isSafeClientId(value.itemId) ||
+    (value.mode !== 'equip' && value.mode !== 'unequip')
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INVENTORY_REQUEST',
+      message: '装備操作が不正です。',
+    };
+  }
+  return { ok: true, value: { expectedVersion, itemId: value.itemId, mode: value.mode } };
+}
+
+function parseInventoryMarkRequest(value: unknown): RequestParseResult<InventoryMarkRequest> {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['expectedVersion', 'favorite', 'itemId', 'locked'])
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INVENTORY_REQUEST',
+      message: '保護設定の形式が不正です。',
+    };
+  }
+  const expectedVersion = parseExpectedVersion(value.expectedVersion);
+  if (
+    expectedVersion === null ||
+    !isSafeClientId(value.itemId) ||
+    typeof value.favorite !== 'boolean' ||
+    typeof value.locked !== 'boolean'
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INVENTORY_REQUEST',
+      message: '保護設定が不正です。',
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      expectedVersion,
+      favorite: value.favorite,
+      itemId: value.itemId,
+      locked: value.locked,
+    },
+  };
+}
+
+function parseInventorySalvageRequest(value: unknown): RequestParseResult<InventorySalvageRequest> {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['confirm', 'expectedVersion', 'itemIds', 'unlock'])
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INVENTORY_REQUEST',
+      message: '分解操作の形式が不正です。',
+    };
+  }
+  const expectedVersion = parseExpectedVersion(value.expectedVersion);
+  if (
+    expectedVersion === null ||
+    !Array.isArray(value.itemIds) ||
+    value.itemIds.length < 1 ||
+    value.itemIds.length > 20 ||
+    value.itemIds.some((itemId) => !isSafeClientId(itemId)) ||
+    new Set(value.itemIds).size !== value.itemIds.length ||
+    typeof value.confirm !== 'boolean' ||
+    typeof value.unlock !== 'boolean'
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INVENTORY_REQUEST',
+      message: '分解対象または確認値が不正です。',
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      confirm: value.confirm,
+      expectedVersion,
+      itemIds: value.itemIds,
+      unlock: value.unlock,
+    },
+  };
 }
 
 function parseCombatCommand(value: unknown): CombatCommand | null {
@@ -1090,6 +1568,13 @@ function repositoryErrorResponse(context: WorkerContext, error: unknown): Respon
     INVALID_ROUTE: [409, '探索状態の順序が不正です。最新状態を取得してください。'],
     ENCOUNTER_NOT_FOUND: [404, '遭遇が見つかりません。'],
     INVALID_COMBAT_STATE: [400, '戦闘状態を読み取れません。'],
+    INVENTORY_FULL: [409, '持ち物の空きがありません。'],
+    ITEM_NOT_FOUND: [404, '対象アイテムが見つかりません。'],
+    ITEM_EQUIPPED: [409, '装備中のアイテムは先に外してください。'],
+    ITEM_PROTECTED: [409, 'ロックまたはfavorite保護を解除してください。'],
+    CONFIRMATION_REQUIRED: [409, 'Rare以上の分解には明示確認が必要です。'],
+    INVALID_INVENTORY_REQUEST: [400, '持ち物操作の形式が不正です。'],
+    INVENTORY_STATE_CONFLICT: [409, '持ち物の状態が更新されました。最新状態を取得してください。'],
   };
   const [status, message] = mapping[error.code];
   return errorResponse(context, status, error.code, message);
