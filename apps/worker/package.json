@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@neverlight/db": "workspace:*",
+    "@neverlight/game-core": "workspace:*",
     "hono": "4.13.3"
   },
   "devDependencies": {

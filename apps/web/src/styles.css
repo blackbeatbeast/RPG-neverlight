@@ -835,6 +835,34 @@ ol {
   border-color: var(--accent);
 }
 
+.vertical-primary {
+  border-color: var(--accent);
+  margin-top: 0.9rem;
+}
+
+.vertical-command-row {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0.8rem 0;
+}
+
+.vertical-details {
+  margin-top: 0.9rem;
+}
+
+.vertical-telegraph,
+.vertical-message {
+  border-left: 3px solid var(--accent);
+  margin-top: 0.75rem;
+  padding-left: 0.7rem;
+}
+
+.vertical-message {
+  color: var(--panel-strong);
+  font-weight: 700;
+}
+
 .site-footer {
   border-top: 1px solid var(--border);
   color: var(--muted);

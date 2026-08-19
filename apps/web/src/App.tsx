@@ -19,6 +19,7 @@ import {
   type UiPreferences,
 } from './app-model.js';
 import { UI_FIXTURES, type SceneFixture } from './fixtures.js';
+import { VerticalSliceApp } from './VerticalSlice.js';
 
 import './styles.css';
 
@@ -59,6 +60,13 @@ function formatScreenAnnouncement(screen: ScreenId, preferences: UiPreferences):
 }
 
 export function App() {
+  const vertical =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('vertical') === '1';
+  return vertical ? <VerticalSliceApp /> : <ShellApp />;
+}
+
+function ShellApp() {
   const [history, setHistory] = useState<ScreenId[]>([]);
   const [preferences, setPreferences] = useState<UiPreferences>(getStoredPreferences);
   const [screen, setScreen] = useState<ScreenId>('landing');
