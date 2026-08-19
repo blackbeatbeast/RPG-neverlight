@@ -995,3 +995,5 @@ export function resolveCombat(input: CombatInput): CombatResolution {
 export function describeEnemyPattern(pattern: EnemyPattern): EnemyPatternSpec {
   return { ...ENEMY_PATTERN_SPECS[pattern] };
 }
+
+export * from './loot.js';

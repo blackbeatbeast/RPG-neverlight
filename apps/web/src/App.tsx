@@ -19,6 +19,7 @@ import {
   type UiPreferences,
 } from './app-model.js';
 import { UI_FIXTURES, type SceneFixture } from './fixtures.js';
+import { InventorySliceApp } from './InventorySlice.js';
 import { VerticalSliceApp } from './VerticalSlice.js';
 
 import './styles.css';
@@ -60,9 +61,13 @@ function formatScreenAnnouncement(screen: ScreenId, preferences: UiPreferences):
 }
 
 export function App() {
-  const vertical =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('vertical') === '1';
+  const params =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+  const vertical = params.get('vertical') === '1';
+  const inventory = params.get('inventory') === '1';
+  if (inventory) return <InventorySliceApp />;
   return vertical ? <VerticalSliceApp /> : <ShellApp />;
 }
 

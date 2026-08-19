@@ -149,8 +149,9 @@ pnpm db:migrate:local
 
 This writes only to Wrangler's local `.wrangler/state` directory. Issue #4 creates only guest
 identity, player aggregate, preferences, feature-flag, inventory-location, idempotency, and rate-limit
-scaffolding. Issue #6 adds route runs, encounters, and append-only combat resolution records, but no
-real loot, currency, trade, or social value. To reset local state, stop development tools and remove
+scaffolding. Issue #6 adds route runs, encounters, and append-only combat resolution records. Issue #7
+adds server-minted item instances, inventory decisions, and a Scrap ledger, but no currency, trade, or
+social value. To reset local state, stop development tools and remove
 `.wrangler/state` from the Worker directory. To delete one guest's data through the API, send
 `POST /api/v1/guest/reset` with the current CSRF token and an `Idempotency-Key`; the Worker deletes the
 guest account and dependent route records, then clears both cookies.
@@ -169,7 +170,10 @@ pnpm format:check
 pnpm db:migrate:local
 pnpm combat:replay fixtures/combat/*.json
 pnpm combat:simulate -- --runs 10000
+pnpm economy:simulate -- --runs 100000
+pnpm ledger:reconcile -- --fixture all
 pnpm test:e2e -- --grep vertical-slice
+pnpm test:e2e -- --grep inventory
 ```
 
 The same commands work in Windows PowerShell. `pnpm test` also runs the blueprint check, the fixed
@@ -193,6 +197,13 @@ also covers guest start, server-selected route/encounter, refresh resume, comman
 exit, forged seed/result rejection, and read-only guidance. CI installs the same pinned Chromium
 browser using the runner's existing system libraries and uploads the Playwright evidence as an
 artifact.
+
+Issue #7's inventory flow mints loot only from a server-selected seed and content/ruleset version.
+The browser receives a seed hash and provenance, never the raw seed. Rare/unique/locked/favorite
+items require explicit confirmation before salvage. Equip, mark, and salvage mutations require CSRF,
+an idempotency key, and the current inventory version; item mint/consume events are append-only in
+`economy_ledger`. Derived stats are computed by the server's deterministic game-core rules and shown
+with item-by-item explanations. No paid slots, premium currency, rerolls, or player trade are enabled.
 
 ## Launch stance
 

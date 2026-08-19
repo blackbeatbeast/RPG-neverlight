@@ -15,6 +15,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude 'dist/**'"
   },
+  "dependencies": {
+    "@neverlight/game-core": "workspace:*"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260819.1"
   }

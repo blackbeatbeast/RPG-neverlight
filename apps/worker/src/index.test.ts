@@ -9,9 +9,12 @@ import {
   type AuthenticatedSession,
   type GuestDataRepository,
   type GuestSessionInput,
+  type InventoryMutationInput,
+  type InventoryView,
   type PlayerView,
   type RateLimitInput,
   type StoredExplorationMutationResult,
+  type StoredInventoryMutationResult,
   type StoredMutationResult,
   type UpdatePreferencesInput,
 } from '@neverlight/db';
@@ -36,6 +39,11 @@ class MemoryGuestRepository implements GuestDataRepository, ExplorationDataRepos
   readonly routes = new Map<string, ExplorationRunView>();
   readonly routePlayers = new Map<string, string>();
   readonly routeIdempotency = new Map<string, { inputHash: string; run: ExplorationRunView }>();
+  readonly inventories = new Map<string, InventoryView>();
+  readonly inventoryIdempotency = new Map<
+    string,
+    { inputHash: string; result: StoredInventoryMutationResult }
+  >();
 
   async authenticateSession(tokenHash: string, now: string): Promise<AuthenticatedSession | null> {
     const session = [...this.sessions.values()].find(
@@ -78,6 +86,13 @@ class MemoryGuestRepository implements GuestDataRepository, ExplorationDataRepos
         false
       >,
     });
+    this.inventories.set(input.playerId, {
+      capacity: 30,
+      codex: [],
+      items: [],
+      materials: {},
+      playerVersion: 1,
+    });
     this.sessions.set(input.sessionId, {
       accountId: input.accountId,
       playerId: input.playerId,
@@ -118,6 +133,7 @@ class MemoryGuestRepository implements GuestDataRepository, ExplorationDataRepos
       if (session.accountId === accountId) this.sessions.delete(id);
     }
     for (const playerId of playerIds) this.players.delete(playerId);
+    for (const playerId of playerIds) this.inventories.delete(playerId);
     for (const [routeRunId, playerId] of this.routePlayers) {
       if (playerIds.includes(playerId)) {
         this.routes.delete(routeRunId);
@@ -155,6 +171,189 @@ class MemoryGuestRepository implements GuestDataRepository, ExplorationDataRepos
     const count = (this.rates.get(key) ?? 0) + 1;
     this.rates.set(key, count);
     return count <= input.limit;
+  }
+
+  async getInventory(playerId: string): Promise<InventoryView | null> {
+    const inventory = this.inventories.get(playerId);
+    return inventory ? clone(inventory) : null;
+  }
+
+  async claimLoot(input: InventoryMutationInput): Promise<StoredInventoryMutationResult> {
+    const replay = this.inventoryReplay(input);
+    if (replay) return replay;
+    if (!input.item || !input.ledgerEventIds?.length) {
+      throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', 'invalid loot');
+    }
+    const current = this.inventories.get(input.playerId);
+    if (!current) throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'missing');
+    const next: InventoryView = {
+      ...clone(current),
+      codex: addMemoryCodex(current, input.item, input.now),
+      items: [clone(input.item), ...current.items],
+      playerVersion: current.playerVersion + 1,
+    };
+    const result = { inventory: next, ledgerEventIds: [...input.ledgerEventIds], replayed: false };
+    this.inventories.set(input.playerId, clone(next));
+    this.inventoryIdempotency.set(inventoryKey(input), {
+      inputHash: input.inputHash,
+      result: clone(result),
+    });
+    return result;
+  }
+
+  async equipItem(input: InventoryMutationInput): Promise<StoredInventoryMutationResult> {
+    const replay = this.inventoryReplay(input);
+    if (replay) return replay;
+    if (!input.itemId || !input.mode || input.expectedVersion === undefined) {
+      throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', 'invalid equip');
+    }
+    const current = this.inventories.get(input.playerId);
+    if (!current) throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'missing');
+    if (current.playerVersion !== input.expectedVersion)
+      throw new GuestRepositoryError('INVENTORY_STATE_CONFLICT', 'stale');
+    const selected = current.items.find(
+      (item) => item.id === input.itemId && item.status === 'active',
+    );
+    if (!selected) throw new GuestRepositoryError('ITEM_NOT_FOUND', 'missing item');
+    if (input.mode === 'equip' && selected.location === 'equipment')
+      throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', 'already equipped');
+    if (input.mode === 'unequip' && selected.location !== 'equipment')
+      throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', 'not equipped');
+    const replaced =
+      input.mode === 'equip'
+        ? current.items.find(
+            (item) => item.location === 'equipment' && item.equipmentSlot === selected.slot,
+          )
+        : undefined;
+    const next: InventoryView = {
+      ...clone(current),
+      items: current.items.map((item) => {
+        if (replaced && item.id === replaced.id)
+          return {
+            ...item,
+            bindState: 'account-bound',
+            equipmentSlot: null,
+            location: 'inventory',
+          };
+        if (item.id !== selected.id) return item;
+        return input.mode === 'equip'
+          ? { ...item, bindState: 'account-bound', equipmentSlot: item.slot, location: 'equipment' }
+          : { ...item, equipmentSlot: null, location: 'inventory' };
+      }),
+      playerVersion: current.playerVersion + 1,
+    };
+    return this.storeInventoryMutation(input, next);
+  }
+
+  async markItem(input: InventoryMutationInput): Promise<StoredInventoryMutationResult> {
+    const replay = this.inventoryReplay(input);
+    if (replay) return replay;
+    if (
+      !input.itemId ||
+      input.expectedVersion === undefined ||
+      input.locked === undefined ||
+      input.favorite === undefined
+    )
+      throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', 'invalid mark');
+    const current = this.inventories.get(input.playerId);
+    if (!current) throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'missing');
+    if (current.playerVersion !== input.expectedVersion)
+      throw new GuestRepositoryError('INVENTORY_STATE_CONFLICT', 'stale');
+    if (!current.items.some((item) => item.id === input.itemId && item.status === 'active'))
+      throw new GuestRepositoryError('ITEM_NOT_FOUND', 'missing item');
+    const next: InventoryView = {
+      ...clone(current),
+      items: current.items.map((item) =>
+        item.id === input.itemId
+          ? { ...item, favorite: input.favorite!, locked: input.locked! }
+          : item,
+      ),
+      playerVersion: current.playerVersion + 1,
+    };
+    return this.storeInventoryMutation(input, next);
+  }
+
+  async salvageItems(input: InventoryMutationInput): Promise<StoredInventoryMutationResult> {
+    const replay = this.inventoryReplay(input);
+    if (replay) return replay;
+    if (
+      !input.itemIds?.length ||
+      input.expectedVersion === undefined ||
+      input.confirm === undefined ||
+      input.unlock === undefined ||
+      !input.ledgerEventIds
+    )
+      throw new GuestRepositoryError('INVALID_INVENTORY_REQUEST', 'invalid salvage');
+    const current = this.inventories.get(input.playerId);
+    if (!current) throw new GuestRepositoryError('PLAYER_NOT_FOUND', 'missing');
+    if (current.playerVersion !== input.expectedVersion)
+      throw new GuestRepositoryError('INVENTORY_STATE_CONFLICT', 'stale');
+    const selected = input.itemIds.map((id) => {
+      const item = current.items.find(
+        (candidate) => candidate.id === id && candidate.status === 'active',
+      );
+      if (!item) throw new GuestRepositoryError('ITEM_NOT_FOUND', 'missing item');
+      if (item.location === 'equipment')
+        throw new GuestRepositoryError('ITEM_EQUIPPED', 'equipped');
+      if (['rare', 'unique', 'relic'].includes(item.rarity) && !input.confirm)
+        throw new GuestRepositoryError('CONFIRMATION_REQUIRED', 'confirm');
+      if ((item.locked || item.favorite) && !input.unlock)
+        throw new GuestRepositoryError('ITEM_PROTECTED', 'protected');
+      return item;
+    });
+    const scrap = selected.reduce(
+      (total, item) =>
+        total +
+        ({ common: 1, uncommon: 2, rare: 4, unique: 7, relic: 10 }[item.rarity] ?? 1) +
+        item.affixes.length,
+      0,
+    );
+    const next: InventoryView = {
+      ...clone(current),
+      items: current.items.map((item) =>
+        selected.some((candidate) => candidate.id === item.id)
+          ? {
+              ...item,
+              equipmentSlot: null,
+              favorite: false,
+              locked: false,
+              location: 'inventory',
+              status: 'salvaged',
+            }
+          : item,
+      ),
+      materials: {
+        ...current.materials,
+        'material.scrap': (current.materials['material.scrap'] ?? 0) + scrap,
+      },
+      playerVersion: current.playerVersion + 1,
+    };
+    return this.storeInventoryMutation(input, next);
+  }
+
+  private inventoryReplay(input: InventoryMutationInput): StoredInventoryMutationResult | null {
+    const existing = this.inventoryIdempotency.get(inventoryKey(input));
+    if (!existing) return null;
+    if (existing.inputHash !== input.inputHash)
+      throw new GuestRepositoryError('IDEMPOTENCY_KEY_REUSED', 'different input');
+    return { ...clone(existing.result), replayed: true };
+  }
+
+  private storeInventoryMutation(
+    input: InventoryMutationInput,
+    inventory: InventoryView,
+  ): StoredInventoryMutationResult {
+    const result = {
+      inventory,
+      ledgerEventIds: [...(input.ledgerEventIds ?? [])],
+      replayed: false,
+    };
+    this.inventories.set(input.playerId, clone(inventory));
+    this.inventoryIdempotency.set(inventoryKey(input), {
+      inputHash: input.inputHash,
+      result: clone(result),
+    });
+    return result;
   }
 
   async getCurrentRoute(playerId: string, now: string): Promise<ExplorationRunView | null> {
@@ -301,6 +500,30 @@ class MemoryGuestRepository implements GuestDataRepository, ExplorationDataRepos
 
 function routeKey(input: ExplorationMutationInput): string {
   return `${input.accountId}:${input.action}:${input.idempotencyKey}`;
+}
+
+function inventoryKey(input: InventoryMutationInput): string {
+  return `${input.accountId}:${input.action}:${input.idempotencyKey}`;
+}
+
+function addMemoryCodex(
+  current: InventoryView,
+  item: NonNullable<InventoryMutationInput['item']>,
+  now: string,
+): InventoryView['codex'] {
+  const entries = [
+    { entryId: item.baseId, entryType: 'item' as const },
+    ...item.affixes.map((affix) => ({ entryId: affix.id, entryType: 'affix' as const })),
+  ];
+  const codex = clone(current.codex);
+  for (const entry of entries) {
+    const existing = codex.find(
+      (candidate) => candidate.entryId === entry.entryId && candidate.entryType === entry.entryType,
+    );
+    if (existing) existing.discoveryCount += 1;
+    else codex.push({ ...entry, discoveryCount: 1, firstSeenAt: now });
+  }
+  return codex;
 }
 
 function assertMemoryRoute(

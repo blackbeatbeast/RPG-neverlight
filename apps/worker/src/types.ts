@@ -4,6 +4,7 @@ import type {
   D1RepositoryBoundary,
   ExplorationDataRepository,
   GuestDataRepository,
+  InventoryDataRepository,
 } from '@neverlight/db';
 
 export interface WorkerBindings {
@@ -15,7 +16,9 @@ export interface WorkerBindings {
 
 export type WorkerDatabaseBoundary = D1RepositoryBoundary;
 
-export type WorkerRepository = GuestDataRepository & ExplorationDataRepository;
+export type WorkerRepository = GuestDataRepository &
+  ExplorationDataRepository &
+  InventoryDataRepository;
 
 export type WorkerRepositoryFactory = (env: WorkerBindings) => WorkerRepository;
 
