@@ -28,6 +28,34 @@ if (!report.valid || !report.bundle) {
   process.exit(1);
 }
 
+const isFirstRegion =
+  report.bundle.contentVersion === '0.4.0' &&
+  report.bundle.routes.some((route) => route.id === 'route.glass-marsh');
+if (isFirstRegion) {
+  const bossCount = report.bundle.nodes.filter((node) => node.type === 'boss').length;
+  const suggestiveAssets = report.bundle.assets.filter((asset) => asset.audience === 'suggestive');
+  const requiredCounts = [
+    [report.bundle.characters.length >= 4, 'at least four adult characters'],
+    [report.bundle.nodes.length >= 12, 'at least twelve reachable route nodes'],
+    [report.bundle.enemies.length >= 7, 'at least six enemies and one boss'],
+    [bossCount === 1, 'exactly one boss node'],
+    [report.bundle.items.length >= 20, 'at least twenty item bases'],
+    [report.bundle.affixes.length >= 20, 'at least twenty affixes'],
+    [report.bundle.quests.length >= 1, 'at least one quest'],
+    [report.bundle.dispatches.length >= 1, 'at least one dispatch'],
+    [suggestiveAssets.length === 0, 'no suggestive assets in the internal bundle'],
+  ];
+  const failed = requiredCounts.filter(([condition]) => !condition).map(([, label]) => label);
+  if (failed.length > 0) {
+    console.error(`First-region acceptance failed: ${failed.join(', ')}`);
+    process.exit(1);
+  }
+  console.log(
+    `- first-region counts: ${report.bundle.characters.length} adult characters, ${report.bundle.nodes.length} nodes, ${report.bundle.enemies.length} enemies, ${report.bundle.items.length} items, ${report.bundle.affixes.length} affixes, ${report.bundle.quests.length} quests, ${report.bundle.dispatches.length} dispatches`,
+  );
+  console.log(`- suggestive assets: ${suggestiveAssets.length} (disabled)`);
+}
+
 const checksum = createHash('sha256')
   .update(canonicalContentJson(report.bundle), 'utf8')
   .digest('hex');

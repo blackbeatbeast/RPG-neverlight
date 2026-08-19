@@ -78,7 +78,7 @@ export const SCREEN_DEFINITIONS: Record<ScreenId, ScreenDefinition> = {
       'Queue up to three commands and read the outcome.',
     ),
     eyebrow: localized('遭遇 / ENCOUNTER', 'ENCOUNTER'),
-    title: localized('信号の獣', 'The Signal Beast'),
+    title: localized('硝子沼の鐘守', 'The Glass Marsh Bellkeeper'),
   },
   error: {
     description: localized(
@@ -94,7 +94,7 @@ export const SCREEN_DEFINITIONS: Record<ScreenId, ScreenDefinition> = {
       'Choose the next step through still art and short text.',
     ),
     eyebrow: localized('探索 / EXPLORATION', 'EXPLORATION'),
-    title: localized('雨の送電塔', 'Rain Tower'),
+    title: localized('硝子沼の水路', 'Glass Marsh Waterway'),
   },
   inventory: {
     description: localized(
@@ -118,7 +118,7 @@ export const SCREEN_DEFINITIONS: Record<ScreenId, ScreenDefinition> = {
       'Read what survived and choose what comes next.',
     ),
     eyebrow: localized('戦利品 / LOOT', 'LOOT'),
-    title: localized('残響する部品', 'Echoing component'),
+    title: localized('鐘守の余音刃', 'Bellkeeper Aftertone Blade'),
   },
   maintenance: {
     description: localized(
@@ -158,7 +158,7 @@ export const SCREEN_DEFINITIONS: Record<ScreenId, ScreenDefinition> = {
       'A small square that leads to dispatch, gear, and records.',
     ),
     eyebrow: localized('街 / TOWN', 'TOWN'),
-    title: localized('雨鐘街の広場', 'Rainbell Square'),
+    title: localized('雨鐘街・外縁', 'Rainbell Quay'),
   },
 };
 
@@ -214,7 +214,7 @@ export function getCommandsForScreen(
         navigate(
           'town',
           localized('ゲームを始める', 'Start a session'),
-          localized('雨鐘街の広場へ進む', 'Enter Rainbell Square'),
+          localized('雨鐘街・外縁へ進む', 'Enter Rainbell Quay'),
         ),
         command(
           '2',
@@ -277,7 +277,7 @@ export function getCommandsForScreen(
       return [
         navigate(
           'exploration',
-          localized('送電塔を探索', 'Explore Rain Tower'),
+          localized('硝子沼を探索', 'Explore Glass Marsh'),
           localized('短い探索を開始する', 'Start a short exploration'),
         ),
         command(

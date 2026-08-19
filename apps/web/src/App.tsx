@@ -295,7 +295,7 @@ function ShellApp() {
             <dl className="rail-list">
               <div>
                 <dt>{text(localized('場所', 'Location'), preferences)}</dt>
-                <dd>Rainbell Square</dd>
+                <dd>Rainbell Quay</dd>
               </div>
               <div>
                 <dt>{text(localized('操作', 'Input'), preferences)}</dt>
@@ -317,10 +317,13 @@ function ShellApp() {
 
         <footer className="site-footer">
           <span>NEVERLIGHT / FOUNDATION UI</span>
-          <span>{text(localized('version 0.2 fixture', 'version 0.2 fixture'), preferences)}</span>
+          <span>{text(localized('first-region 0.4', 'first-region 0.4'), preferences)}</span>
           <span>
             {text(
-              localized('画像出所: 抽象fixture', 'Image source: abstract fixture'),
+              localized(
+                '画像出所: 承認前の抽象placeholder',
+                'Image source: unapproved abstract placeholder',
+              ),
               preferences,
             )}
           </span>
@@ -513,12 +516,16 @@ function RoutesContent({ locale }: { locale: UiPreferences['locale'] }) {
 function ExplorationContent({ locale }: { locale: UiPreferences['locale'] }) {
   return (
     <div className="content-grid">
-      <InfoPanel label="EVENT / 01" locale={locale} title={localized('塔の入口', 'Tower entrance')}>
+      <InfoPanel
+        label="EVENT / 01"
+        locale={locale}
+        title={localized('硝子沼の入口', 'Glass Marsh entrance')}
+      >
         <p>
           {resolveText(
             localized(
-              '送電塔の下で、点滅する信号がこちらを待っている。次の操作は一つだけ。',
-              'Beneath the tower, a blinking signal waits. There is one next action.',
+              '硝子沼の水路で、三本の信号線が次の一手を示している。',
+              'Three signal lines mark the next move in the Glass Marsh waterway.',
             ),
             locale,
           )}
@@ -556,7 +563,7 @@ function EncounterContent({
       <InfoPanel
         label="TELEGRAPH / READABLE"
         locale={locale}
-        title={localized('信号の獣', 'Signal Beast')}
+        title={localized('硝子沼の鐘守', 'Glass Marsh Bellkeeper')}
       >
         <p>
           {resolveText(

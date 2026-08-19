@@ -19,13 +19,13 @@ test.describe('Issue #2 semantic retro/modern shell', () => {
     });
 
     await page.getByRole('button', { name: /ゲームを始める/ }).click();
-    await expect(page.locator('#page-title')).toHaveText('雨鐘街の広場');
+    await expect(page.locator('#page-title')).toHaveText('雨鐘街・外縁');
     await page.keyboard.press('1');
     await expect(page.locator('#page-title')).toHaveText('次の道を選ぶ');
-    await page.getByRole('button', { name: /送電塔を探索/ }).click();
-    await expect(page.locator('#page-title')).toHaveText('雨の送電塔');
+    await page.getByRole('button', { name: /硝子沼を探索/ }).click();
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の水路');
     await page.keyboard.press('1');
-    await expect(page.locator('#page-title')).toHaveText('信号の獣');
+    await expect(page.locator('#page-title')).toHaveText('硝子沼の鐘守');
 
     await page.keyboard.press('1');
     await page.keyboard.press('2');
@@ -34,7 +34,7 @@ test.describe('Issue #2 semantic retro/modern shell', () => {
     await page.keyboard.press('4');
     await expect(page.locator('#page-title')).toHaveText('遭遇の記録');
     await page.getByRole('button', { name: /戦利品を読む/ }).click();
-    await expect(page.locator('#page-title')).toHaveText('残響する部品');
+    await expect(page.locator('#page-title')).toHaveText('鐘守の余音刃');
 
     await page.locator('.utility-nav').getByRole('button', { exact: true, name: '記録庫' }).click();
     await expect(page.locator('#page-title')).toHaveText('記録庫');

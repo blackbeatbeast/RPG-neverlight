@@ -1,3 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+
 const {
   LOOT_AFFIX_COUNT_BOUNDS,
   LOOT_RARITY_BUDGETS,
@@ -17,6 +22,48 @@ function integerArgument(name, fallback) {
 }
 
 const runs = integerArgument('--runs', 10_000);
+const bundleIndex = process.argv.indexOf('--bundle');
+const bundleName = bundleIndex >= 0 ? process.argv[bundleIndex + 1] : undefined;
+let bundleInfo = null;
+if (bundleName !== undefined) {
+  if (bundleName !== 'first-region') {
+    throw new Error(`Unknown content bundle: ${bundleName}`);
+  }
+  const bundlePath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../content/first-region/bundle.json',
+  );
+  const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+  const counts = {
+    affixes: bundle.affixes.length,
+    characters: bundle.characters.length,
+    enemies: bundle.enemies.length,
+    items: bundle.items.length,
+    nodes: bundle.nodes.length,
+  };
+  if (
+    bundle.contentVersion !== '0.4.0' ||
+    counts.characters < 4 ||
+    counts.enemies < 7 ||
+    counts.items < 20 ||
+    counts.affixes < 20 ||
+    counts.nodes < 12
+  ) {
+    throw new Error(`Content bundle does not meet first-region counts: ${JSON.stringify(counts)}`);
+  }
+  bundleInfo = {
+    checksum: hashLootValue({
+      affixes: bundle.affixes.map((entry) => entry.id).sort(),
+      characters: bundle.characters.map((entry) => entry.id).sort(),
+      contentVersion: bundle.contentVersion,
+      enemies: bundle.enemies.map((entry) => entry.id).sort(),
+      items: bundle.items.map((entry) => entry.id).sort(),
+      nodes: bundle.nodes.map((entry) => entry.id).sort(),
+    }),
+    counts,
+    name: bundleName,
+  };
+}
 const rarities = { common: 0, uncommon: 0, rare: 0, unique: 0, relic: 0 };
 let totalAffixes = 0;
 let totalScrap = 0;
@@ -62,6 +109,7 @@ const metrics = {
 console.log(
   JSON.stringify(
     {
+      bundle: bundleInfo,
       bounds: {
         affixCount: LOOT_AFFIX_COUNT_BOUNDS,
         affixBudget: LOOT_RARITY_BUDGETS,

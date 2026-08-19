@@ -215,7 +215,7 @@ describe('resolveLootDrop', () => {
       contentVersion: '0.1.0',
       itemId: 'item-test-1',
       seed: 0x1234,
-      sourceRef: 'rain-tower.cache',
+      sourceRef: 'glass-marsh.cache',
     };
     const first = resolveLootDrop(options);
     const second = resolveLootDrop(options);
@@ -233,7 +233,7 @@ describe('resolveLootDrop', () => {
       itemId: 'item-rare-1',
       minimumRarity: 'rare',
       seed: 7,
-      sourceRef: 'rain-tower.boss',
+      sourceRef: 'glass-marsh.boss',
     }).item;
     const derived = deriveEquipmentStats(
       {

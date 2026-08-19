@@ -194,6 +194,8 @@ export const validContentBundleFixture = {
       relatedIds: ['zone.example', 'char.example'],
     },
   ],
+  quests: [],
+  dispatches: [],
   dropTables: [
     {
       id: 'drop.example',

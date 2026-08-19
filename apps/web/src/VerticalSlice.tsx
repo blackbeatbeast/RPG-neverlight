@@ -156,7 +156,7 @@ export function VerticalSliceApp() {
         method: 'POST',
       });
       if (!sessionResponse.ok) throw new Error(apiError(await sessionResponse.json()));
-      const result = await postJson<RoutePayload>('/api/v1/routes/rain-tower/start', {}, 'start');
+      const result = await postJson<RoutePayload>('/api/v1/routes/glass-marsh/start', {}, 'start');
       setRoute(result.route);
       setStage(stageForRoute(result.route));
       setMessage('ゲストセッションとルートを開始しました。');
@@ -243,9 +243,9 @@ export function VerticalSliceApp() {
     stage === 'landing'
       ? '実APIの縦切り'
       : stage === 'route'
-        ? '雨の送電塔'
+        ? '硝子沼の水路'
         : stage === 'encounter'
-          ? '信号の獣'
+          ? '硝子沼の鐘守'
           : stage === 'result'
             ? '遭遇の記録'
             : stage === 'complete'
@@ -311,7 +311,7 @@ export function VerticalSliceApp() {
                 <article className="info-panel">
                   <p className="eyebrow">START / GUEST</p>
                   <h2>短いルートを開始</h2>
-                  <p>ゲストセッションを作成し、サーバーが選ぶ雨の送電塔へ進みます。</p>
+                  <p>ゲストセッションを作成し、サーバーが選ぶ硝子沼の水路へ進みます。</p>
                   <p className="muted-copy">
                     seed・結果・プレイヤー状態はブラウザから指定できません。
                   </p>
@@ -326,7 +326,7 @@ export function VerticalSliceApp() {
                     </span>
                     <span className="command-copy">
                       <strong>実APIルートを開始</strong>
-                      <span>ゲストとして送電塔へ進む</span>
+                      <span>ゲストとして硝子沼へ進む</span>
                     </span>
                   </button>
                 </article>
@@ -378,7 +378,7 @@ export function VerticalSliceApp() {
               <section className="content-grid">
                 <article className="info-panel">
                   <p className="eyebrow">ENCOUNTER / {route.encounter.encounterVersion}</p>
-                  <h2>信号の獣</h2>
+                  <h2>硝子沼の鐘守</h2>
                   <p>
                     pattern: {route.encounter.pattern} / turn: {route.encounter.combatState.turn}
                   </p>

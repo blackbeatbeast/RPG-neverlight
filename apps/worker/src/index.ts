@@ -67,7 +67,7 @@ type WorkerContext = Context<WorkerEnvironment>;
 type PreferencePatch = Partial<PlayerPreferences>;
 
 const PREFERENCE_ACTION = 'player.preferences.update';
-const ROUTE_ID = 'rain-tower';
+const ROUTE_ID = 'route.glass-marsh';
 const ROUTE_VERSION = '1.0.0';
 const ROUTE_TTL_SECONDS = 60 * 30;
 const ROUTE_START_ACTION = 'route.start';
@@ -130,7 +130,7 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
     });
   });
 
-  app.post('/api/v1/routes/rain-tower/start', async (context) => {
+  app.post('/api/v1/routes/glass-marsh/start', async (context) => {
     const blocked = ensureWritable(context);
     if (blocked) return blocked;
     const repository = repositoryFactory(context.env);
@@ -501,7 +501,7 @@ export function createApp(repositoryFactory: WorkerRepositoryFactory = defaultRe
     const seed = randomSeed();
     const itemId = createOpaqueId('item');
     const loot =
-      parsed.value.sourceRef === 'rain-tower.boss'
+      parsed.value.sourceRef === 'glass-marsh.boss'
         ? resolveLootDrop({
             itemId,
             minimumRarity: 'rare',
@@ -1054,7 +1054,7 @@ type EmptyRequest = Record<string, never>;
 type ExpectedVersionRequest = { expectedVersion: number };
 type ChooseRequest = ExpectedVersionRequest & { nodeId: 'encounter' };
 type CombatRequest = ExpectedVersionRequest & { commands: CombatCommand[] };
-type LootClaimRequest = { sourceRef: 'rain-tower.boss' | 'rain-tower.cache' };
+type LootClaimRequest = { sourceRef: 'glass-marsh.boss' | 'glass-marsh.cache' };
 type InventoryEquipRequest = ExpectedVersionRequest & {
   itemId: string;
   mode: 'equip' | 'unequip';
@@ -1189,7 +1189,7 @@ function parseLootClaimRequest(value: unknown): RequestParseResult<LootClaimRequ
       message: 'ドロップ取得の形式が不正です。',
     };
   }
-  if (value.sourceRef !== 'rain-tower.cache' && value.sourceRef !== 'rain-tower.boss') {
+  if (value.sourceRef !== 'glass-marsh.cache' && value.sourceRef !== 'glass-marsh.boss') {
     return {
       ok: false,
       status: 400,

@@ -22,7 +22,8 @@
     "economy:simulate": "pnpm --filter @neverlight/game-core run build && node scripts/economy-simulate.mjs",
     "ledger:reconcile": "node scripts/ledger-reconcile.mjs",
     "validate:blueprint": "node scripts/validate-blueprint.mjs",
-    "content:validate": "pnpm --filter @neverlight/content-schema run build && node scripts/validate-content.mjs",
+    "content:validate": "pnpm --filter @neverlight/content-schema run build && node scripts/validate-content.mjs content/first-region/bundle.json",
+    "content:similarity-review": "node scripts/content-similarity-review.mjs",
     "db:migrate:local": "pnpm --filter @neverlight/worker run db:migrate:local"
   },
   "devDependencies": {
