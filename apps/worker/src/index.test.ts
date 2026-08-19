@@ -918,13 +918,60 @@ describe('exploration-to-combat vertical slice', () => {
     const app = createApp(() => new MemoryGuestRepository());
     const readOnlyEnv = { ...env, READ_ONLY: 'true' };
     const operations = await app.request('/api/v1/operations', undefined, readOnlyEnv);
-    await expect(operations.json()).resolves.toEqual({
+    await expect(operations.json()).resolves.toMatchObject({
       message: '現在は読み取り専用です。現在地の確認と退出案内だけ利用できます。',
       mode: 'read-only',
+      reason: 'forced:read-only',
       writable: false,
     });
     const blocked = await app.request('/api/v1/guest/start', { method: 'POST' }, readOnlyEnv);
     expect(blocked.status).toBe(503);
     await expect(blocked.json()).resolves.toMatchObject({ error: { code: 'READ_ONLY' } });
+  });
+
+  it('enters degraded then read-only mode at artificial budget thresholds', async () => {
+    const app = createApp(() => new MemoryGuestRepository());
+    const budgetEnv = {
+      ...env,
+      BUDGET_WINDOW_SECONDS: '3600',
+      BUDGET_REQUEST_LIMIT: '10',
+      BUDGET_WRITE_LIMIT: '10',
+      BUDGET_DEGRADED_REQUESTS: '2',
+      BUDGET_READ_ONLY_REQUESTS: '4',
+      BUDGET_DEGRADED_WRITES: '8',
+      BUDGET_READ_ONLY_WRITES: '9',
+    };
+    await app.request('/api/v1/player', undefined, budgetEnv);
+    await app.request('/api/v1/player', undefined, budgetEnv);
+    const degraded = await app.request('/api/v1/operations', undefined, budgetEnv);
+    await expect(degraded.json()).resolves.toMatchObject({
+      mode: 'degraded',
+      reason: 'budget:request-degraded-threshold',
+      writable: true,
+    });
+    await app.request('/api/v1/player', undefined, budgetEnv);
+    await app.request('/api/v1/player', undefined, budgetEnv);
+    const readOnly = await app.request('/api/v1/operations', undefined, budgetEnv);
+    await expect(readOnly.json()).resolves.toMatchObject({
+      mode: 'read-only',
+      reason: 'budget:request-read-only-threshold',
+      writable: false,
+    });
+    const blocked = await app.request('/api/v1/guest/start', { method: 'POST' }, budgetEnv);
+    expect(blocked.status).toBe(503);
+    await expect(blocked.json()).resolves.toMatchObject({ error: { code: 'READ_ONLY' } });
+  });
+
+  it('keeps maintenance mode limited to diagnostics', async () => {
+    const app = createApp(() => new MemoryGuestRepository());
+    const maintenanceEnv = { ...env, OPERATION_MODE: 'maintenance' };
+    const operations = await app.request('/api/v1/operations', undefined, maintenanceEnv);
+    await expect(operations.json()).resolves.toMatchObject({
+      mode: 'maintenance',
+      writable: false,
+    });
+    const player = await app.request('/api/v1/player', undefined, maintenanceEnv);
+    expect(player.status).toBe(503);
+    await expect(player.json()).resolves.toMatchObject({ error: { code: 'MAINTENANCE' } });
   });
 });

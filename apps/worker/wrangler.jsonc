@@ -18,6 +18,36 @@
       "migrations_dir": "../../packages/db/migrations",
     },
   ],
+  "env": {
+    "preview": {
+      "name": "project-neverlight-preview",
+      "workers_dev": true,
+      "vars": {
+        "ENVIRONMENT": "preview",
+        "VERSION": "preview",
+        "READ_ONLY": "false",
+        "OPERATION_MODE": "normal",
+        "BUDGET_WINDOW_SECONDS": "86400",
+        "BUDGET_REQUEST_LIMIT": "50000",
+        "BUDGET_WRITE_LIMIT": "40000",
+        "BUDGET_DEGRADED_REQUESTS": "32500",
+        "BUDGET_READ_ONLY_REQUESTS": "40000",
+        "BUDGET_DEGRADED_WRITES": "28000",
+        "BUDGET_READ_ONLY_WRITES": "36000",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "neverlight-preview",
+          "database_id": "PREVIEW_D1_DATABASE_ID_REQUIRED",
+          "migrations_dir": "../../packages/db/migrations",
+        },
+      ],
+      "observability": {
+        "enabled": false,
+      },
+    },
+  },
   "dev": {
     "ip": "127.0.0.1",
     "port": 8787,

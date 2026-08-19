@@ -24,7 +24,10 @@
     "validate:blueprint": "node scripts/validate-blueprint.mjs",
     "content:validate": "pnpm --filter @neverlight/content-schema run build && node scripts/validate-content.mjs content/first-region/bundle.json",
     "content:similarity-review": "node scripts/content-similarity-review.mjs",
-    "db:migrate:local": "pnpm --filter @neverlight/worker run db:migrate:local"
+    "db:migrate:local": "pnpm --filter @neverlight/worker run db:migrate:local",
+    "deploy:preview": "node scripts/deploy-preview.mjs",
+    "smoke:preview": "node scripts/smoke-preview.mjs",
+    "test:abuse": "node scripts/test-abuse.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
