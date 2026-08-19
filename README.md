@@ -64,6 +64,107 @@ Run the blueprint check:
 node scripts/validate-blueprint.mjs
 ```
 
+## Issue #1 foundation workspace
+
+The bootstrap workspace is intentionally small. It contains the following independent boundaries:
+
+```text
+apps/web              React + Vite client
+apps/worker           Hono + Cloudflare Worker API
+packages/game-core    pure deterministic TypeScript rules
+packages/content-schema  minimal versioned content validation
+packages/db           D1 boundary and local migrations
+packages/ui           shared semantic UI component
+```
+
+### First setup (standard shell)
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+pnpm db:migrate:local
+```
+
+### First setup (Windows PowerShell)
+
+```powershell
+corepack enable
+pnpm install --frozen-lockfile
+pnpm db:migrate:local
+```
+
+CI installs the pinned pnpm 9.15.4 directly with `pnpm/action-setup@v4`; it does not run
+`corepack enable` a second time. On Windows, if the local `corepack enable` command fails with
+`EPERM`, do not use administrator elevation or disable signature verification. Install the pinned
+pnpm version into a user-writable prefix instead, then open a new shell (or update the current
+session's `PATH`):
+
+```powershell
+npm install --global --prefix "$env:LOCALAPPDATA\pnpm" pnpm@9.15.4
+$env:Path = "$env:LOCALAPPDATA\pnpm;$env:Path"
+pnpm --version
+```
+
+Continue only when the version check reports `9.15.4`.
+
+The checked-in `.node-version`, `.nvmrc`, and root `package.json` pin Node.js 22.13.0 and pnpm
+9.15.4. No `.env`, `.dev.vars`, Cloudflare account, production D1 database, or secret is needed
+for the local foundation.
+
+### Development servers
+
+Start the web client and local Worker together:
+
+```bash
+pnpm dev
+```
+
+```powershell
+pnpm dev
+```
+
+The web client is served at `http://127.0.0.1:5173`. Its `/api` requests proxy to the local Worker
+at `http://127.0.0.1:8787`. The Worker health check is:
+
+```text
+GET http://127.0.0.1:8787/api/health
+```
+
+The expected local response is a JSON object with `ok: true`, service
+`project-neverlight-worker`, environment `local`, and version `development`.
+
+### Local D1 migration
+
+The migration lives in `packages/db/migrations` and is wired into the Worker through a local-only
+Wrangler configuration. Apply it with either shell:
+
+```bash
+pnpm db:migrate:local
+```
+
+```powershell
+pnpm db:migrate:local
+```
+
+This writes only to Wrangler's local `.wrangler/state` directory. It creates a bootstrap marker and
+does not create player, identity, item, card, currency, social, or content tables. To reset local
+state, stop development tools and remove `.wrangler/state` from the Worker directory.
+
+### Verification commands
+
+```bash
+node scripts/validate-blueprint.mjs
+corepack enable
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+The same commands work in Windows PowerShell. `pnpm test` also runs the blueprint check, the fixed
+seed `game-core` test, the valid/invalid content fixture test, and the Worker health test.
+
 ## Launch stance
 
 - Repository visibility remains owner-controlled; publishing scripts never change it.

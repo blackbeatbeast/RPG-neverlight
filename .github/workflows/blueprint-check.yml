@@ -1,4 +1,4 @@
-name: Blueprint check
+name: Project Neverlight CI
 
 on:
   push:
@@ -9,13 +9,27 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
+          cache: pnpm
       - name: Validate blueprint
         run: node scripts/validate-blueprint.mjs
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build

@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "project-neverlight-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "workers_dev": false,
+  "vars": {
+    "ENVIRONMENT": "local",
+    "VERSION": "development",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "neverlight-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "preview_database_id": "neverlight-local",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
+  "dev": {
+    "ip": "127.0.0.1",
+    "port": 8787,
+    "local_protocol": "http",
+  },
+  "observability": {
+    "enabled": false,
+  },
+}
