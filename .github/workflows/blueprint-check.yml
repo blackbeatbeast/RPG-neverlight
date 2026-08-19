@@ -21,8 +21,6 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-      - name: Enable Corepack
-        run: corepack enable
       - name: Validate blueprint
         run: node scripts/validate-blueprint.mjs
       - name: Install dependencies

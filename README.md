@@ -93,6 +93,20 @@ pnpm install --frozen-lockfile
 pnpm db:migrate:local
 ```
 
+CI installs the pinned pnpm 9.15.4 directly with `pnpm/action-setup@v4`; it does not run
+`corepack enable` a second time. On Windows, if the local `corepack enable` command fails with
+`EPERM`, do not use administrator elevation or disable signature verification. Install the pinned
+pnpm version into a user-writable prefix instead, then open a new shell (or update the current
+session's `PATH`):
+
+```powershell
+npm install --global --prefix "$env:LOCALAPPDATA\pnpm" pnpm@9.15.4
+$env:Path = "$env:LOCALAPPDATA\pnpm;$env:Path"
+pnpm --version
+```
+
+Continue only when the version check reports `9.15.4`.
+
 The checked-in `.node-version`, `.nvmrc`, and root `package.json` pin Node.js 22.13.0 and pnpm
 9.15.4. No `.env`, `.dev.vars`, Cloudflare account, production D1 database, or secret is needed
 for the local foundation.
