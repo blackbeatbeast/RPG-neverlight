@@ -25,6 +25,8 @@ jobs:
         run: node scripts/validate-blueprint.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Validate content bundle
+        run: pnpm content:validate
       - name: Lint
         run: pnpm lint
       - name: Typecheck
